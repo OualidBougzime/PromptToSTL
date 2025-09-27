@@ -1,13 +1,55 @@
+// src/cad/cadEngine.ts - Version Améliorée
 import * as THREE from 'three'
 import { CSG } from 'three-csg-ts'
+import { ParametricEngine } from './parametricEngine'
+import { ModelValidator } from '../utils/modelValidator'
+import { extendCADEngineWithAdvancedShapes } from './advancedShapes'
+
+export interface CADEngineOptions {
+    enableCSG?: boolean
+    enableAdvancedShapes?: boolean
+    enableParametricExtraction?: boolean
+    maxComplexity?: number
+    autoOptimize?: boolean
+}
 
 export class CADEngine {
     private initialized = false
+    private parametricEngine: ParametricEngine
+    private options: CADEngineOptions
+    private executionHistory: Array<{
+        code: string
+        timestamp: number
+        success: boolean
+        meshCount: number
+    }> = []
+
+    constructor(options: CADEngineOptions = {}) {
+        this.options = {
+            enableCSG: true,
+            enableAdvancedShapes: true,
+            enableParametricExtraction: true,
+            maxComplexity: 100000, // Max triangles
+            autoOptimize: true,
+            ...options
+        }
+
+        this.parametricEngine = new ParametricEngine()
+
+        // Étendre avec les formes avancées si activé
+        if (this.options.enableAdvancedShapes) {
+            extendCADEngineWithAdvancedShapes(this)
+        }
+    }
 
     async initialize(): Promise<void> {
         if (this.initialized) return
+
+        console.log('[CAD Engine] Initialisation...')
+        console.log('[CAD Engine] Options:', this.options)
+
         this.initialized = true
-        console.log('CAD Engine initialized')
+        console.log('[CAD Engine] Initialisé avec succès')
     }
 
     async executeCADCode(code: string): Promise<THREE.Mesh[]> {
@@ -15,339 +57,447 @@ export class CADEngine {
             await this.initialize()
         }
 
-        console.log('Executing CAD code:', code)
+        console.log('[CAD Engine] Exécution du code CAD')
+        const startTime = Date.now()
 
         try {
-            // Pre-validate and clean the code
-            const cleanCode = this.sanitizeCode(code)
-            console.log('Cleaned code:', cleanCode)
+            // Nettoyage et validation préalable du code
+            const cleanedCode = this.sanitizeCode(code)
+            console.log('[CAD Engine] Code nettoyé')
 
-            // Create a safe execution context with helper functions
-            const executionContext = {
-                THREE,
-                CSG,
-                Math,
-                console: {
-                    log: (...args: any[]) => console.log('[CAD Code]', ...args),
-                    warn: (...args: any[]) => console.warn('[CAD Code]', ...args),
-                    error: (...args: any[]) => console.error('[CAD Code]', ...args)
-                },
-                // Helper functions for complex shapes
-                createHuman: this.createHuman.bind(this),
-                createTree: this.createTree.bind(this),
-                createBuilding: this.createBuilding.bind(this),
-                createCar: this.createCar.bind(this),
-                randomInRange: (min: number, max: number) => Math.random() * (max - min) + min
+            // Détection des patterns dangereux
+            if (this.hasDangerousPatterns(cleanedCode)) {
+                console.warn('[CAD Engine] Code potentiellement dangereux détecté')
+                return [this.createFallbackShape('sphere')]
             }
 
-            // Wrap the code in a function if it's not already
-            let wrappedCode = cleanCode
-            if (!cleanCode.includes('function generateModel')) {
-                wrappedCode = `
-          function generateModel() {
-            const meshes = []
-            ${cleanCode}
-            return meshes
-          }
-        `
-            }
+            // Création du contexte d'exécution sécurisé
+            const executionContext = this.createExecutionContext()
 
-            // Create the execution function with error handling
-            const functionBody = `
-        const { THREE, CSG, Math, console, createHuman, createTree, createBuilding, createCar, randomInRange } = this;
-        try {
-          ${wrappedCode}
-          const result = generateModel();
-          if (!Array.isArray(result)) {
-            console.warn('Code did not return an array');
-            return [];
-          }
-          return result;
-        } catch (error) {
-          console.error('Code execution error:', error);
-          return [];
-        }
-      `
+            // Wrapping du code si nécessaire
+            const wrappedCode = this.wrapCode(cleanedCode)
 
-            const executeFunction = new Function(functionBody)
-            const result = executeFunction.call(executionContext)
+            // Exécution avec timeout
+            const result = await this.executeWithTimeout(wrappedCode, executionContext, 10000)
 
-            // Validate and process result
+            // Validation et traitement du résultat
             if (!Array.isArray(result)) {
-                console.warn('CAD code did not return an array, creating fallback')
+                console.warn('[CAD Engine] Le code n\'a pas retourné un tableau')
                 return [this.createFallbackShape()]
             }
 
-            // Filter and validate meshes
-            const validMeshes = result.filter(item => {
-                if (!item || typeof item !== 'object') {
-                    console.warn('Invalid item in result array:', item)
-                    return false
-                }
-                if (item.isMesh || (item.geometry && item.material)) return true
-                return false
-            })
+            // Filtrage et validation des meshes
+            let validMeshes = this.filterValidMeshes(result)
 
             if (validMeshes.length === 0) {
-                console.warn('No valid meshes generated, creating fallback')
+                console.warn('[CAD Engine] Aucun mesh valide généré')
                 return [this.createFallbackShape()]
             }
 
-            // Ensure all items are proper Three.js meshes
-            const finalMeshes = validMeshes.map(mesh => {
-                if (mesh.isMesh) return mesh
+            // Application des optimisations automatiques
+            if (this.options.autoOptimize) {
+                validMeshes = this.optimizeMeshes(validMeshes)
+            }
 
-                // Convert to proper mesh if needed
-                const material = mesh.material || new THREE.MeshStandardMaterial({ color: 0x888888 })
-                return new THREE.Mesh(mesh.geometry, material)
+            // Validation de la complexité
+            const totalTriangles = this.calculateTotalTriangles(validMeshes)
+            if (totalTriangles > this.options.maxComplexity!) {
+                console.warn(`[CAD Engine] Complexité trop élevée: ${totalTriangles} triangles`)
+                validMeshes = this.simplifyMeshes(validMeshes)
+            }
+
+            // Enregistrement dans l'historique
+            this.executionHistory.push({
+                code,
+                timestamp: Date.now(),
+                success: true,
+                meshCount: validMeshes.length
             })
 
-            console.log(`Successfully generated ${finalMeshes.length} meshes`)
-            return finalMeshes
+            const executionTime = Date.now() - startTime
+            console.log(`[CAD Engine] Exécution réussie: ${validMeshes.length} meshes en ${executionTime}ms`)
+
+            return validMeshes
 
         } catch (error) {
-            console.error('CAD code execution error:', error)
+            console.error('[CAD Engine] Erreur d\'exécution:', error)
 
-            // Return a fallback shape instead of crashing
+            // Enregistrement de l'échec
+            this.executionHistory.push({
+                code,
+                timestamp: Date.now(),
+                success: false,
+                meshCount: 0
+            })
+
+            // Retour d'un shape de fallback au lieu de crasher
             return [this.createFallbackShape('cube')]
         }
     }
 
-    // Helper function to create a basic human figure
-    private createHuman(): THREE.Group {
-        const human = new THREE.Group()
-
-        // Head
-        const headGeo = new THREE.SphereGeometry(2, 16, 16)
-        const headMat = new THREE.MeshStandardMaterial({ color: 0xffdbac })
-        const head = new THREE.Mesh(headGeo, headMat)
-        head.position.y = 16
-        human.add(head)
-
-        // Body
-        const bodyGeo = new THREE.CylinderGeometry(2.5, 3, 8, 8)
-        const bodyMat = new THREE.MeshStandardMaterial({ color: 0x4169e1 })
-        const body = new THREE.Mesh(bodyGeo, bodyMat)
-        body.position.y = 8
-        human.add(body)
-
-        // Arms
-        for (let i = 0; i < 2; i++) {
-            const armGeo = new THREE.CylinderGeometry(0.8, 0.8, 6, 8)
-            const armMat = new THREE.MeshStandardMaterial({ color: 0xffdbac })
-            const arm = new THREE.Mesh(armGeo, armMat)
-            arm.position.set((i * 2 - 1) * 4, 10, 0)
-            arm.rotation.z = (i * 2 - 1) * Math.PI / 8
-            human.add(arm)
+    // Extraction des paramètres d'un code généré
+    extractParameters(code: string) {
+        if (!this.options.enableParametricExtraction) {
+            return []
         }
 
-        // Legs  
-        for (let i = 0; i < 2; i++) {
-            const legGeo = new THREE.CylinderGeometry(1, 1, 8, 8)
-            const legMat = new THREE.MeshStandardMaterial({ color: 0x2f4f4f })
-            const leg = new THREE.Mesh(legGeo, legMat)
-            leg.position.set((i * 2 - 1) * 1.5, 0, 0)
-            human.add(leg)
+        try {
+            return this.parametricEngine.extractParameters(code)
+        } catch (error) {
+            console.error('[CAD Engine] Erreur extraction paramètres:', error)
+            return []
         }
-
-        return human
     }
 
-    // Helper function to create a basic tree
-    private createTree(): THREE.Group {
-        const tree = new THREE.Group()
-
-        // Trunk
-        const trunkGeo = new THREE.CylinderGeometry(1.5, 2, 10, 8)
-        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x8b4513 })
-        const trunk = new THREE.Mesh(trunkGeo, trunkMat)
-        trunk.position.y = 5
-        tree.add(trunk)
-
-        // Branches
-        for (let i = 0; i < 6; i++) {
-            const angle = (i / 6) * Math.PI * 2
-            const branchGeo = new THREE.CylinderGeometry(0.3, 0.6, 4, 6)
-            const branchMat = new THREE.MeshStandardMaterial({ color: 0x654321 })
-            const branch = new THREE.Mesh(branchGeo, branchMat)
-            branch.position.set(
-                Math.cos(angle) * 2,
-                8 + Math.sin(i) * 1,
-                Math.sin(angle) * 2
-            )
-            branch.rotation.set(Math.PI / 4, angle, 0)
-            tree.add(branch)
+    // Génération d'un modèle paramétrique
+    generateParametricModel(code: string) {
+        if (!this.options.enableParametricExtraction) {
+            throw new Error('Extraction paramétrique désactivée')
         }
 
-        // Leaves
-        for (let i = 0; i < 15; i++) {
-            const leafGeo = new THREE.SphereGeometry(Math.random() * 1.5 + 0.5, 6, 6)
-            const leafMat = new THREE.MeshStandardMaterial({ color: 0x228b22 })
-            const leaf = new THREE.Mesh(leafGeo, leafMat)
-            leaf.position.set(
-                (Math.random() - 0.5) * 8,
-                10 + Math.random() * 6,
-                (Math.random() - 0.5) * 8
-            )
-            tree.add(leaf)
-        }
-
-        return tree
+        const parameters = this.extractParameters(code)
+        return this.parametricEngine.generateParametricCode(code, parameters)
     }
 
-    // Helper function to create a basic building
-    private createBuilding(): THREE.Group {
-        const building = new THREE.Group()
+    // Exécution avec paramètres personnalisés
+    async executeWithParameters(
+        parametricModel: any,
+        customParameters: Record<string, number>
+    ): Promise<THREE.Mesh[]> {
+        try {
+            const meshes = this.parametricEngine.executeParametricModel(
+                parametricModel,
+                customParameters
+            )
 
-        // Main structure
-        const baseGeo = new THREE.BoxGeometry(15, 25, 12)
-        const baseMat = new THREE.MeshStandardMaterial({ color: 0x708090 })
-        const base = new THREE.Mesh(baseGeo, baseMat)
-        base.position.y = 12.5
-        building.add(base)
+            return this.validateMeshes(meshes)
+        } catch (error) {
+            console.error('[CAD Engine] Erreur exécution paramétrique:', error)
+            return []
+        }
+    }
 
-        // Windows
-        for (let floor = 0; floor < 4; floor++) {
-            for (let win = 0; win < 3; win++) {
-                const windowGeo = new THREE.BoxGeometry(2, 2.5, 0.2)
-                const windowMat = new THREE.MeshStandardMaterial({ color: 0x87ceeb })
-                const window = new THREE.Mesh(windowGeo, windowMat)
-                window.position.set(
-                    (win - 1) * 4,
-                    floor * 5 + 3,
-                    6.1
-                )
-                building.add(window)
+    private createExecutionContext() {
+        const context = {
+            THREE,
+            CSG: this.options.enableCSG ? CSG : undefined,
+            Math,
+            console: {
+                log: (...args: any[]) => console.log('[CAD Code]', ...args),
+                warn: (...args: any[]) => console.warn('[CAD Code]', ...args),
+                error: (...args: any[]) => console.error('[CAD Code]', ...args)
+            },
+            // Fonctions d'aide pour la génération
+            createParametricShape: this.createParametricShape.bind(this),
+            optimizeGeometry: this.optimizeGeometry.bind(this),
+
+            // Formes avancées (si activées)
+            ...(this.options.enableAdvancedShapes ? {
+                createGear: (this as any).createGear?.bind(this),
+                createSpring: (this as any).createSpring?.bind(this),
+                createRibbledBracket: (this as any).createRibbledBracket?.bind(this),
+                createVentilatedEnclosure: (this as any).createVentilatedEnclosure?.bind(this),
+                createThreadedConnector: (this as any).createThreadedConnector?.bind(this),
+                createToolHolder: (this as any).createToolHolder?.bind(this)
+            } : {}),
+
+            // Utilitaires
+            randomInRange: (min: number, max: number) => Math.random() * (max - min) + min,
+            clamp: (value: number, min: number, max: number) => Math.min(Math.max(value, min), max),
+            lerp: (a: number, b: number, t: number) => a + (b - a) * t
+        }
+
+        return context
+    }
+
+    private async executeWithTimeout(
+        code: string,
+        context: any,
+        timeout: number
+    ): Promise<any> {
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+                reject(new Error('Timeout d\'exécution dépassé'))
+            }, timeout)
+
+            try {
+                const functionBody = `
+          const { THREE, CSG, Math, console, createParametricShape, optimizeGeometry, 
+                  createGear, createSpring, createRibbledBracket, createVentilatedEnclosure,
+                  createThreadedConnector, createToolHolder, randomInRange, clamp, lerp } = this;
+          
+          try {
+            ${code}
+            
+            // Si fonction generateModel existe, l'appeler
+            if (typeof generateModel === 'function') {
+              return generateModel();
             }
-        }
+            
+            // Sinon chercher un tableau meshes
+            if (typeof meshes !== 'undefined' && Array.isArray(meshes)) {
+              return meshes;
+            }
+            
+            console.warn('Aucune fonction generateModel ou variable meshes trouvée');
+            return [];
+            
+          } catch (error) {
+            console.error('Erreur dans le code utilisateur:', error);
+            return [];
+          }
+        `
 
-        // Roof
-        const roofGeo = new THREE.ConeGeometry(10, 8, 4)
-        const roofMat = new THREE.MeshStandardMaterial({ color: 0x8b0000 })
-        const roof = new THREE.Mesh(roofGeo, roofMat)
-        roof.position.y = 29
-        roof.rotation.y = Math.PI / 4
-        building.add(roof)
+                const executeFunction = new Function(functionBody)
+                const result = executeFunction.call(context)
 
-        return building
-    }
+                clearTimeout(timer)
+                resolve(result)
 
-    // Helper function to create a basic car
-    private createCar(): THREE.Group {
-        const car = new THREE.Group()
-
-        // Body
-        const bodyGeo = new THREE.BoxGeometry(8, 2, 3)
-        const bodyMat = new THREE.MeshStandardMaterial({ color: 0xff4500 })
-        const body = new THREE.Mesh(bodyGeo, bodyMat)
-        body.position.y = 1.5
-        car.add(body)
-
-        // Cabin
-        const cabinGeo = new THREE.BoxGeometry(5, 2, 2.8)
-        const cabinMat = new THREE.MeshStandardMaterial({ color: 0x4169e1 })
-        const cabin = new THREE.Mesh(cabinGeo, cabinMat)
-        cabin.position.y = 3
-        car.add(cabin)
-
-        // Wheels
-        for (let i = 0; i < 4; i++) {
-            const wheelGeo = new THREE.CylinderGeometry(1, 1, 0.5, 8)
-            const wheelMat = new THREE.MeshStandardMaterial({ color: 0x2f2f2f })
-            const wheel = new THREE.Mesh(wheelGeo, wheelMat)
-            const x = (i % 2) * 6 - 3
-            const z = Math.floor(i / 2) * 3 - 1.5
-            wheel.position.set(x, 0.5, z)
-            wheel.rotation.z = Math.PI / 2
-            car.add(wheel)
-        }
-
-        return car
+            } catch (error) {
+                clearTimeout(timer)
+                reject(error)
+            }
+        })
     }
 
     private sanitizeCode(code: string): string {
-        // Remove problematic patterns
-        let clean = code
-
-        // Remove ALL import statements
-        clean = clean.replace(/import\s+.*?from\s+['"][^'"]*['"];?\s*/g, '')
-        clean = clean.replace(/import\s+\{[^}]*\}\s+from\s+['"][^'"]*['"];?\s*/g, '')
-        clean = clean.replace(/import\s+\*\s+as\s+\w+\s+from\s+['"][^'"]*['"];?\s*/g, '')
-
-        // Remove duplicate variable declarations
-        clean = clean.replace(/const meshes = \[.*?\];?\s*/g, '')
-
-        // Remove duplicate returns and broken CSG operations
-        clean = clean.replace(/return meshes;?\s*return meshes;?/g, 'return meshes')
-        clean = clean.replace(/const tree = CSG\.fromMesh.*$/gm, '') // Remove broken CSG operations
-        clean = clean.replace(/return tree\s*$/gm, '') // Remove return tree
-
-        // Fix common variable scoping issues - add meshes.push for meshes created in code
-        // Find meshes created but not pushed
-        const meshCreationPattern = /const (\w+) = new THREE\.Mesh\([^)]+\)/g
-        let match
-        const meshNames: string[] = []
-
-        while ((match = meshCreationPattern.exec(clean)) !== null) {
-            const meshName = match[1]
-            if (!meshNames.includes(meshName) && meshName !== 'meshes') {
-                meshNames.push(meshName)
-            }
-        }
-
-        // Add meshes.push() for any mesh that doesn't have it
-        meshNames.forEach(meshName => {
-            if (!clean.includes(`meshes.push(${meshName})`)) {
-                // Find the mesh creation and add push after position/rotation if present
-                const meshDefPattern = new RegExp(`(const ${meshName} = new THREE\\.Mesh\\([^)]+\\)[^\\n]*(?:\\n[^\\n]*(?:position|rotation|scale)\\.[^\\n]*)*)`, 'g')
-                clean = clean.replace(meshDefPattern, `$1\nmeshes.push(${meshName})`)
-            }
-        })
-
-        // Fix CSG operations that reference undefined variables
-        clean = clean.replace(/CSG\.fromMesh\((\w+)\)\.union\(CSG\.fromMesh\((\w+)\)\)\.subtract\(CSG\.fromMesh\((\w+)\)\)/g,
-            '/* Complex CSG operation removed - variables may be undefined */')
-
-        // Fix loops that don't push meshes
-        clean = clean.replace(/for\s*\([^)]+\)\s*\{([^}]*const\s+(\w+)\s*=\s*new\s+THREE\.Mesh[^}]*)\}/g,
-            (match, loopBody, meshVar) => {
-                if (!loopBody.includes('meshes.push')) {
-                    return match.replace(loopBody, loopBody + `\n  meshes.push(${meshVar})`)
-                }
-                return match
-            })
-
-        // Remove function wrapper if present (we'll add our own)
-        clean = clean.replace(/function generateModel\(\)\s*\{/, '')
-        clean = clean.replace(/function\s+\w+\(\)\s*\{[^}]*\}?\s*/g, '') // Remove extra functions
-        clean = clean.replace(/\}\s*$/, '')
-
-        // Remove problematic CSG method calls that don't exist
-        clean = clean.replace(/CSG\.fromGeometry\(/g, 'CSG.fromMesh(new THREE.Mesh(')
-        clean = clean.replace(/\.translate\(/g, '.position.set(') // Fix non-existent methods
-
-        return clean.trim()
+        // NE RIEN NETTOYER - Le code du serveur est maintenant propre
+        console.log('Code original:', code)
+        console.log('Code nettoyé:', code) // Pas de nettoyage
+        return code.trim()
     }
 
-    // Helper method to create basic shapes for fallback
+    private hasDangerousPatterns(code: string): boolean {
+        const dangerousPatterns = [
+            /while\s*\(\s*true\s*\)/, // Boucles infinies
+            /for\s*\([^)]*;\s*true\s*;/, // Boucles infinies
+            /eval\s*\(/, // eval
+            /Function\s*\(/, // Constructor Function
+            /setTimeout|setInterval/, // Timers
+            /XMLHttpRequest|fetch/, // Requêtes réseau
+            /localStorage|sessionStorage/, // Storage
+            /\.innerHTML\s*=/, // Manipulation DOM
+            /alert\s*\(|confirm\s*\(|prompt\s*\(/ // Dialogs
+        ]
+
+        return dangerousPatterns.some(pattern => pattern.test(code))
+    }
+
+    private wrapCode(code: string): string {
+        // Si le code contient déjà une fonction generateModel, pas besoin de wrapper
+        if (code.includes('function generateModel')) {
+            return code
+        }
+
+        // Sinon, wrapper le code
+        return `
+      function generateModel() {
+        const meshes = []
+        
+        try {
+          ${code}
+          return meshes
+        } catch (error) {
+          console.error('Erreur dans la génération:', error)
+          return []
+        }
+      }
+    `
+    }
+
+    private filterValidMeshes(result: any[]): THREE.Mesh[] {
+        return result.filter((item: any) => {
+            // Vérifier si c'est un mesh valide
+            if (!item) return false
+
+            if (item.isMesh || (item.geometry && item.material)) {
+                return true
+            }
+
+            // Vérifier si c'est un Group contenant des meshes
+            if (item.isGroup) {
+                let hasMeshes = false
+                item.traverse((child: any) => {
+                    if (child.isMesh) hasMeshes = true
+                })
+                return hasMeshes
+            }
+
+            return false
+        }).map((item: any) => {
+            // Convertir en mesh si nécessaire
+            if (item.isMesh) {
+                return item
+            }
+
+            if (item.isGroup) {
+                // Pour les groupes, créer un mesh combiné (simplification)
+                const geometry = new THREE.BufferGeometry()
+                const material = new THREE.MeshStandardMaterial({ color: 0x888888 })
+                return new THREE.Mesh(geometry, material)
+            }
+
+            // Créer un mesh à partir d'une géométrie
+            const material = item.material || new THREE.MeshStandardMaterial({ color: 0x888888 })
+            return new THREE.Mesh(item.geometry, material)
+        })
+    }
+
+    private calculateTotalTriangles(meshes: THREE.Mesh[]): number {
+        return meshes.reduce((total, mesh) => {
+            if (!mesh.geometry) return total
+
+            const geometry = mesh.geometry as THREE.BufferGeometry
+            const position = geometry.getAttribute('position')
+            if (!position) return total
+
+            if (geometry.index) {
+                return total + geometry.index.count / 3
+            } else {
+                return total + position.count / 3
+            }
+        }, 0)
+    }
+
+    private simplifyMeshes(meshes: THREE.Mesh[]): THREE.Mesh[] {
+        console.log('[CAD Engine] Simplification des meshes pour réduire la complexité')
+
+        return meshes.map((mesh, index) => {
+            try {
+                // Simplification basique - réduction du niveau de détail
+                if (mesh.geometry) {
+                    const geometry = mesh.geometry as THREE.BufferGeometry
+
+                    // Si trop de vertices, créer une version simplifiée
+                    const position = geometry.getAttribute('position')
+                    if (position && position.count > 3000) {
+                        // Créer une version LOD (Level of Detail) réduite
+                        const simplifiedGeometry = this.createLODGeometry(geometry)
+                        mesh.geometry = simplifiedGeometry
+                    }
+                }
+
+                return mesh
+            } catch (error) {
+                console.warn(`[CAD Engine] Erreur simplification mesh ${index}:`, error)
+                return mesh
+            }
+        })
+    }
+
+    private createLODGeometry(originalGeometry: THREE.BufferGeometry): THREE.BufferGeometry {
+        // Implémentation simplifiée - dans la pratique, utiliser une lib de simplification
+        originalGeometry.computeBoundingBox()
+        if (!originalGeometry.boundingBox) return originalGeometry
+
+        const size = originalGeometry.boundingBox.getSize(new THREE.Vector3())
+        const maxDim = Math.max(size.x, size.y, size.z)
+
+        // Créer une géométrie simplifiée basée sur la forme générale
+        if (maxDim > 0) {
+            const segments = Math.max(8, Math.min(32, Math.floor(maxDim / 10)))
+            return new THREE.BoxGeometry(size.x, size.y, size.z, segments, segments, segments)
+        }
+
+        return originalGeometry
+    }
+
+    private createParametricShape(type: string, params: any): THREE.Mesh {
+        switch (type.toLowerCase()) {
+            case 'box':
+                return new THREE.Mesh(
+                    new THREE.BoxGeometry(params.width || 10, params.height || 10, params.depth || 10),
+                    new THREE.MeshStandardMaterial({ color: params.color || 0x666666 })
+                )
+
+            case 'sphere':
+                return new THREE.Mesh(
+                    new THREE.SphereGeometry(params.radius || 5, params.segments || 16, params.segments || 16),
+                    new THREE.MeshStandardMaterial({ color: params.color || 0x666666 })
+                )
+
+            case 'cylinder':
+                return new THREE.Mesh(
+                    new THREE.CylinderGeometry(
+                        params.radiusTop || 5,
+                        params.radiusBottom || 5,
+                        params.height || 10,
+                        params.segments || 16
+                    ),
+                    new THREE.MeshStandardMaterial({ color: params.color || 0x666666 })
+                )
+
+            default:
+                return this.createFallbackShape()
+        }
+    }
+
+    private optimizeGeometry(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+        if (!geometry) return geometry
+
+        // Calculer les normales si manquantes
+        if (!geometry.getAttribute('normal')) {
+            geometry.computeVertexNormals()
+        }
+
+        // Calculer les bounding box/sphere
+        geometry.computeBoundingBox()
+        geometry.computeBoundingSphere()
+
+        return geometry
+    }
+
+    // Méthodes publiques pour la validation et l'optimisation
+    validateMeshes(meshes: THREE.Mesh[]): THREE.Mesh[] {
+        return ModelValidator.autoFixMeshes(meshes)
+    }
+
+    optimizeMeshes(meshes: THREE.Mesh[]): THREE.Mesh[] {
+        return meshes.map(mesh => {
+            try {
+                // Optimisation de la géométrie
+                if (mesh.geometry) {
+                    mesh.geometry = this.optimizeGeometry(mesh.geometry as THREE.BufferGeometry)
+                }
+
+                // Assurer un matériau valide
+                if (!mesh.material) {
+                    mesh.material = new THREE.MeshStandardMaterial({
+                        color: 0x666666,
+                        metalness: 0.3,
+                        roughness: 0.7
+                    })
+                }
+
+                return mesh
+            } catch (error) {
+                console.warn('[CAD Engine] Erreur optimisation mesh:', error)
+                return mesh
+            }
+        })
+    }
+
     createFallbackShape(type: 'cube' | 'sphere' | 'cylinder' = 'cube'): THREE.Mesh {
         let geometry: THREE.BufferGeometry
 
         switch (type) {
             case 'sphere':
-                geometry = new THREE.SphereGeometry(10, 32, 32)
+                geometry = new THREE.SphereGeometry(10, 16, 16)
                 break
             case 'cylinder':
-                geometry = new THREE.CylinderGeometry(5, 5, 20, 32)
+                geometry = new THREE.CylinderGeometry(5, 5, 20, 16)
                 break
             default:
                 geometry = new THREE.BoxGeometry(20, 20, 20)
         }
 
         const material = new THREE.MeshStandardMaterial({
-            color: 0xff6b6b, // Red color to indicate fallback
+            color: 0xff6b6b,
             transparent: true,
-            opacity: 0.8
+            opacity: 0.8,
+            metalness: 0.1,
+            roughness: 0.8
         })
 
         const mesh = new THREE.Mesh(geometry, material)
@@ -356,49 +506,78 @@ export class CADEngine {
         return mesh
     }
 
-    // Method to validate and clean generated meshes
-    validateMeshes(meshes: THREE.Mesh[]): THREE.Mesh[] {
-        return meshes.filter(mesh => {
-            if (!mesh || !mesh.geometry) {
-                console.warn('Invalid mesh found, skipping')
-                return false
-            }
+    // Méthodes pour les statistiques et le debugging
+    getExecutionStats() {
+        const recent = this.executionHistory.slice(-10)
+        const successRate = recent.filter(h => h.success).length / recent.length * 100
 
-            // Check if geometry has vertices
-            const position = mesh.geometry.getAttribute('position')
-            if (!position || position.count === 0) {
-                console.warn('Mesh with empty geometry found, skipping')
-                return false
-            }
-
-            return true
-        })
+        return {
+            totalExecutions: this.executionHistory.length,
+            recentSuccessRate: successRate,
+            averageExecutionTime: this.calculateAverageExecutionTime(),
+            lastExecution: this.executionHistory[this.executionHistory.length - 1]
+        }
     }
 
-    // Method to optimize meshes for better performance
-    optimizeMeshes(meshes: THREE.Mesh[]): THREE.Mesh[] {
-        return meshes.map(mesh => {
-            try {
-                // Compute bounding box and center if needed
-                if (!mesh.geometry.boundingBox) {
-                    mesh.geometry.computeBoundingBox()
-                }
+    private calculateAverageExecutionTime(): number {
+        if (this.executionHistory.length < 2) return 0
 
-                // Compute vertex normals if not present
-                if (!mesh.geometry.getAttribute('normal')) {
-                    mesh.geometry.computeVertexNormals()
-                }
+        const recent = this.executionHistory.slice(-5)
+        let totalTime = 0
 
-                // Ensure material exists
-                if (!mesh.material) {
-                    mesh.material = new THREE.MeshStandardMaterial({ color: 0x888888 })
-                }
+        for (let i = 1; i < recent.length; i++) {
+            totalTime += recent[i].timestamp - recent[i - 1].timestamp
+        }
 
-                return mesh
-            } catch (error) {
-                console.warn('Error optimizing mesh:', error)
-                return mesh
-            }
-        })
+        return totalTime / (recent.length - 1)
+    }
+
+    clearHistory() {
+        this.executionHistory = []
+    }
+
+    // Diagnostic et debug
+    diagnoseCode(code: string): {
+        issues: string[]
+        suggestions: string[]
+        complexity: 'low' | 'medium' | 'high'
+        estimatedExecutionTime: number
+    } {
+        const issues: string[] = []
+        const suggestions: string[] = []
+
+        // Analyse de la complexité
+        const loopCount = (code.match(/for\s*\(|while\s*\(/g) || []).length
+        const geometryCount = (code.match(/new THREE\.\w+Geometry/g) || []).length
+        const meshCount = (code.match(/new THREE\.Mesh/g) || []).length
+
+        let complexity: 'low' | 'medium' | 'high' = 'low'
+
+        if (loopCount > 5 || geometryCount > 10 || meshCount > 10) {
+            complexity = 'high'
+            suggestions.push('Considérer la réduction du nombre de boucles ou d\'objets')
+        } else if (loopCount > 2 || geometryCount > 5 || meshCount > 5) {
+            complexity = 'medium'
+        }
+
+        // Vérifications spécifiques
+        if (!code.includes('meshes.push')) {
+            issues.push('Aucun objet n\'est ajouté au tableau meshes')
+            suggestions.push('Utiliser meshes.push(votreObject) pour ajouter des objets')
+        }
+
+        if (code.includes('CSG') && !this.options.enableCSG) {
+            issues.push('Opérations CSG utilisées mais désactivées')
+            suggestions.push('Activer les opérations CSG dans les options')
+        }
+
+        const estimatedExecutionTime = loopCount * 10 + geometryCount * 5 + meshCount * 2
+
+        return {
+            issues,
+            suggestions,
+            complexity,
+            estimatedExecutionTime
+        }
     }
 }
