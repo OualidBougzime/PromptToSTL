@@ -131,7 +131,7 @@ function SceneEnvironment() {
                 resolution={256}
                 color="#000000"
             />
-            <Environment preset="studio" />
+            {/* <Environment preset="studio" /> */}
         </>
     )
 }
