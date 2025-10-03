@@ -2,6 +2,7 @@
 import express from 'express'
 import cors from 'cors'
 import fetch from 'node-fetch'
+import { TEMPLATES, selectTemplate } from './templates'
 
 const app = express()
 app.use(cors())
@@ -12,670 +13,308 @@ const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434'
 const MODEL = process.env.OLLAMA_MODEL || 'qwen2.5-coder:14b'
 
 // ============================================
-// AGENT 0: CLASSIFIER (Règles - pas de LLM)
+// EXTRACTION DE PARAMÈTRES PAR LLM
 // ============================================
-interface Classification {
-    type: string
-    confidence: number
-    keywords: string[]
-}
+function extractParameters(prompt: string, templateName: string): Record<string, number | string> {
+    const template = TEMPLATES[templateName]
+    const params: Record<string, number | string> = {}
 
-function classifyPrompt(prompt: string): Classification {
-    const lower = prompt.toLowerCase()
+    console.log(`\n📊 Extracting parameters for: ${templateName}`)
 
-    // Visserie spécialisée (haute priorité)
-    if (lower.includes('countersunk') || lower.includes('flathead') || lower.includes('csk')) {
-        return { type: 'countersunk_screw', confidence: 0.95, keywords: ['countersunk', 'conical', 'flat'] }
+    // Cas spécial: dimensions carrées
+    const squareMatch = prompt.match(/(\d+)mm\s*x\s*\1mm/i)
+    if (squareMatch) {
+        params.size = parseFloat(squareMatch[1])
+        console.log(`  ✓ size: ${params.size} (square)`)
     }
 
-    if (lower.includes('hexagonal') && (lower.includes('bolt') || lower.includes('screw'))) {
-        return { type: 'hexagonal_bolt', confidence: 0.95, keywords: ['hexagonal', 'bolt', '6-sided'] }
+    const boxMatch = prompt.match(/(\d+)mm\s*x\s*(\d+)mm(?:\s*x\s*(\d+)mm)?/i)
+    if (boxMatch) {
+        if (!params.length) params.length = parseFloat(boxMatch[1])
+        if (!params.width) params.width = parseFloat(boxMatch[2])
+        if (boxMatch[3] && !params.thickness && !params.height) {
+            if (prompt.toLowerCase().includes('thick')) {
+                params.thickness = parseFloat(boxMatch[3])
+            } else {
+                params.height = parseFloat(boxMatch[3])
+            }
+        }
+        console.log(`  ✓ box dimensions: ${boxMatch[1]} x ${boxMatch[2]} x ${boxMatch[3] || 'N/A'}`)
     }
 
-    if (lower.includes('nut') && !lower.includes('wing') && !lower.includes('butter')) {
-        return { type: 'hex_nut', confidence: 0.9, keywords: ['nut', 'hexagonal', 'threaded'] }
+    const mountingHoleMatch = prompt.match(/(\d+)\s+M(\d+)\s+(?:mounting\s+)?holes?/i)
+    if (mountingHoleMatch) {
+        params.holeCount = parseFloat(mountingHoleMatch[1])
+        params.holeDiameter = parseFloat(mountingHoleMatch[2])
+        console.log(`  ✓ mounting holes: ${mountingHoleMatch[1]} x M${mountingHoleMatch[2]}`)
     }
 
-    // Engrenages spécialisés
-    if (lower.includes('worm') && lower.includes('gear')) {
-        return { type: 'worm_gear', confidence: 0.95, keywords: ['worm', 'helical', 'spiral', 'long'] }
+    // Pattern spécifique pour COMPTEURS (nombre AVANT le mot)
+    const counterPatterns: Record<string, RegExp> = {
+        nodeCount: /(\d+)\s+(?:rotating\s+)?nodes?/i,
+        segmentCount: /(\d+)\s+(?:annular\s+)?segments?/i,
+        channelCount: /(\d+)\s+(?:micro[- ]release\s+)?channels?/i,
+        filamentCount: /(\d+)\s+(?:braided\s+)?(?:filaments?|wires?)/i,
+        ringCount: /(\d+)\s+(?:circumferential\s+)?rings?/i,
+        chamberCount: /(\d+)\s+(?:expandable\s+)?chambers?/i,
+        strapCount: /(\d+)\s+(?:adjustable\s+)?straps?/i,
+        holeCount: /(\d+)\s+(?:mounting\s+)?holes?/i,
+        teeth: /(\d+)\s+teeth/i,
+        cellCount: /(\d+)\s+cells?/i,
+        ribCount: /(\d+)\s+(?:reinforcement\s+)?ribs?/i
     }
 
-    if (lower.includes('planetary') || (lower.includes('sun') && lower.includes('planet'))) {
-        return { type: 'planetary_gear', confidence: 0.9, keywords: ['planetary', 'sun', 'planet'] }
-    }
-
-    if (lower.includes('bevel') && lower.includes('gear')) {
-        return { type: 'bevel_gear', confidence: 0.85, keywords: ['bevel', 'conical'] }
-    }
-
-    if (lower.includes('spur') || (lower.includes('gear') && lower.includes('teeth') && !lower.includes('worm'))) {
-        return { type: 'spur_gear', confidence: 0.8, keywords: ['spur', 'gear', 'flat'] }
-    }
-
-    // Autres objets
-    if (lower.includes('bracket') || lower.includes('l-bracket')) {
-        return { type: 'bracket', confidence: 0.9, keywords: ['bracket', 'L-shape'] }
-    }
-
-    if (lower.includes('spring') || lower.includes('coil')) {
-        return { type: 'spring', confidence: 0.9, keywords: ['spring', 'coil'] }
-    }
-
-    if (lower.includes('washer') && !lower.includes('washing')) {
-        return { type: 'washer', confidence: 0.95, keywords: ['washer', 'ring'] }
-    }
-
-    if (lower.includes('cylinder') && !lower.includes('gear')) {
-        return { type: 'cylinder', confidence: 0.95, keywords: ['cylinder'] }
-    }
-
-    return { type: 'generic', confidence: 0.5, keywords: [] }
-}
-
-// ============================================
-// BASE DE DONNÉES D'EXEMPLES CIBLÉS
-// ============================================
-const TARGETED_EXAMPLES: Record<string, string> = {
-    countersunk_screw: `
-# CRITICAL EXAMPLE - Countersunk Screw (CONICAL HEAD ONLY)
-A countersunk screw has a CONICAL (cone-shaped) head that sits flush with the surface.
-NEVER use hexagonal head for countersunk screws!
-
-\`\`\`javascript
-// Parameters
-const headDiameter = 10
-const headHeight = 3
-const bodyDiameter = 6
-const bodyLength = 22
-
-function generateModel() {
-  const meshes = []
-  
-  // CONICAL head (radius 0 at top = cone)
-  const headGeo = new THREE.CylinderGeometry(0, headDiameter/2, headHeight, 32)
-  const headMat = new THREE.MeshStandardMaterial({ color: 0x888888 })
-  const head = new THREE.Mesh(headGeo, headMat)
-  head.position.y = bodyLength + headHeight/2
-  meshes.push(head)
-  
-  // Phillips cross slot
-  const slot1Geo = new THREE.BoxGeometry(headDiameter * 0.7, 0.5, 1)
-  const slot1Mat = new THREE.MeshStandardMaterial({ color: 0x222222 })
-  const slot1 = new THREE.Mesh(slot1Geo, slot1Mat)
-  slot1.position.y = bodyLength + headHeight - 0.5
-  meshes.push(slot1)
-  
-  const slot2Geo = new THREE.BoxGeometry(1, 0.5, headDiameter * 0.7)
-  const slot2Mat = new THREE.MeshStandardMaterial({ color: 0x222222 })
-  const slot2 = new THREE.Mesh(slot2Geo, slot2Mat)
-  slot2.position.y = bodyLength + headHeight - 0.5
-  meshes.push(slot2)
-  
-  // Cylindrical body
-  const bodyGeo = new THREE.CylinderGeometry(bodyDiameter/2, bodyDiameter/2, bodyLength, 32)
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x888888 })
-  const body = new THREE.Mesh(bodyGeo, bodyMat)
-  body.position.y = bodyLength/2
-  meshes.push(body)
-  
-  // Thread rings
-  for (let i = 0; i < 10; i++) {
-    const y = (i * bodyLength / 10) + bodyLength/20
-    const ringGeo = new THREE.TorusGeometry(bodyDiameter/2 + 0.3, 0.25, 8, 16)
-    const ringMat = new THREE.MeshStandardMaterial({ color: 0x666666 })
-    const ring = new THREE.Mesh(ringGeo, ringMat)
-    ring.position.y = y
-    ring.rotation.x = Math.PI/2
-    meshes.push(ring)
-  }
-  
-  return meshes
-}
-\`\`\`
-`,
-
-    worm_gear: `
-# CRITICAL EXAMPLE - Worm Gear (LONG CYLINDER + HELICAL SPIRAL)
-A worm gear is a LONG cylinder (not a flat disk!) with helical spiral threads along its length.
-NEVER use flat disk with circular teeth for worm gears!
-
-\`\`\`javascript
-// Parameters
-const diameter = 25
-const length = 60  // LONG cylinder (4-6x longer than diameter)
-const teethCount = 20
-const threadPitch = 3
-
-function generateModel() {
-  const meshes = []
-  
-  // Main LONG cylindrical body
-  const bodyGeo = new THREE.CylinderGeometry(diameter/2, diameter/2, length, 32)
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x888888 })
-  const body = new THREE.Mesh(bodyGeo, bodyMat)
-  body.position.y = length/2
-  meshes.push(body)
-  
-  // Helical spiral threads (VERTICAL positioning with rotation)
-  for (let i = 0; i < teethCount; i++) {
-    const y = (i / teethCount) * length  // VERTICAL position
-    const angle = (i / teethCount) * Math.PI * 8  // Multiple rotations for spiral
-    
-    const x = Math.cos(angle) * (diameter/2 + 1)
-    const z = Math.sin(angle) * (diameter/2 + 1)
-    
-    const threadGeo = new THREE.BoxGeometry(1.5, threadPitch, 2)
-    const threadMat = new THREE.MeshStandardMaterial({ color: 0x666666 })
-    const thread = new THREE.Mesh(threadGeo, threadMat)
-    thread.position.set(x, y, z)
-    thread.rotation.y = angle
-    meshes.push(thread)
-  }
-  
-  return meshes
-}
-\`\`\`
-`,
-
-    spur_gear: `
-# EXAMPLE - Spur Gear (FLAT DISK + CIRCULAR TEETH)
-\`\`\`javascript
-// Parameters
-const outerRadius = 20
-const innerRadius = 5
-const thickness = 5
-const teethCount = 16
-
-function generateModel() {
-  const meshes = []
-  
-  // Main flat disk
-  const diskGeo = new THREE.CylinderGeometry(outerRadius, outerRadius, thickness, 32)
-  const diskMat = new THREE.MeshStandardMaterial({ color: 0x888888 })
-  const disk = new THREE.Mesh(diskGeo, diskMat)
-  meshes.push(disk)
-  
-  // Teeth in circular pattern
-  for (let i = 0; i < teethCount; i++) {
-    const angle = (i / teethCount) * Math.PI * 2
-    const x = Math.cos(angle) * outerRadius
-    const z = Math.sin(angle) * outerRadius
-    
-    const toothGeo = new THREE.BoxGeometry(2, thickness, 3)
-    const toothMat = new THREE.MeshStandardMaterial({ color: 0x888888 })
-    const tooth = new THREE.Mesh(toothGeo, toothMat)
-    tooth.position.set(x, 0, z)
-    tooth.rotation.y = angle
-    meshes.push(tooth)
-  }
-  
-  // Center hole
-  const holeGeo = new THREE.CylinderGeometry(innerRadius, innerRadius, thickness + 1, 32)
-  const holeMat = new THREE.MeshStandardMaterial({ color: 0x222222 })
-  const hole = new THREE.Mesh(holeGeo, holeMat)
-  meshes.push(hole)
-  
-  return meshes
-}
-\`\`\`
-`,
-
-    hexagonal_bolt: `
-# EXAMPLE - Hexagonal Bolt
-\`\`\`javascript
-// Parameters
-const headDiameter = 13
-const headHeight = 5
-const bodyDiameter = 8
-const bodyLength = 15
-
-function generateModel() {
-  const meshes = []
-  
-  // Hexagonal head (6 segments)
-  const headGeo = new THREE.CylinderGeometry(headDiameter/2, headDiameter/2, headHeight, 6)
-  const headMat = new THREE.MeshStandardMaterial({ color: 0x888888 })
-  const head = new THREE.Mesh(headGeo, headMat)
-  head.position.y = bodyLength + headHeight/2
-  meshes.push(head)
-  
-  // Cylindrical body
-  const bodyGeo = new THREE.CylinderGeometry(bodyDiameter/2, bodyDiameter/2, bodyLength, 32)
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x888888 })
-  const body = new THREE.Mesh(bodyGeo, bodyMat)
-  body.position.y = bodyLength/2
-  meshes.push(body)
-  
-  // Thread rings
-  for (let i = 0; i < 10; i++) {
-    const y = (i * bodyLength / 10) + bodyLength/20
-    const ringGeo = new THREE.TorusGeometry(bodyDiameter/2 + 0.3, 0.25, 8, 16)
-    const ringMat = new THREE.MeshStandardMaterial({ color: 0x666666 })
-    const ring = new THREE.Mesh(ringGeo, ringMat)
-    ring.position.y = y
-    ring.rotation.x = Math.PI/2
-    meshes.push(ring)
-  }
-  
-  return meshes
-}
-\`\`\`
-`
-}
-
-const BASE_SYSTEM_PROMPT = `You are an expert CAD code generator for THREE.js.
-
-# CRITICAL RULES:
-1. Match the EXACT object type requested
-2. Use the geometry shown in the example
-3. NEVER mix different object types (e.g., hexagonal head on countersunk screw)
-4. Calculate positions to avoid overlaps
-5. Generate COMPLETE, executable code
-
-# OUTPUT FORMAT:
-\`\`\`javascript
-// Parameters
-const param1 = value
-
-function generateModel() {
-  const meshes = []
-  
-  // Component description
-  const geo = new THREE.GeometryType(...)
-  const mat = new THREE.MeshStandardMaterial({ color: 0xHEX })
-  const mesh = new THREE.Mesh(geo, mat)
-  mesh.position.y = value
-  meshes.push(mesh)
-  
-  return meshes
-}
-\`\`\`
-
-Follow the example below EXACTLY for this object type:`
-
-// ============================================
-// VALIDATOR (Heuristique - pas de LLM)
-// ============================================
-interface ValidationResult {
-    valid: boolean
-    error?: string
-    fixInstructions?: string
-}
-
-function validateCode(code: string, classification: Classification): ValidationResult {
-    const { type } = classification
-
-    // Validation spécifique par type
-    switch (type) {
-        case 'countersunk_screw':
-            return validateCountersunkScrew(code)
-
-        case 'worm_gear':
-            return validateWormGear(code)
-
-        case 'spur_gear':
-            return validateSpurGear(code)
-
-        default:
-            return validateGeneric(code)
-    }
-}
-
-function validateCountersunkScrew(code: string): ValidationResult {
-    // Chercher tête hexagonale (ERREUR pour countersunk)
-    const hasHexHead = code.includes(', 6)') && code.includes('headGeo')
-
-    // Chercher tête conique (CORRECT)
-    const hasConicHead =
-        (code.includes('CylinderGeometry(0,') || code.includes('ConeGeometry')) &&
-        code.includes('headGeo')
-
-    if (hasHexHead && !hasConicHead) {
-        return {
-            valid: false,
-            error: 'Countersunk screw MUST have CONICAL head, not hexagonal',
-            fixInstructions: `Replace hexagonal head with conical head:
-const headGeo = new THREE.CylinderGeometry(0, headDiameter/2, headHeight, 32)
-This creates a cone (radius 0 at top, full radius at bottom)`
+    // Extraire les compteurs en priorité
+    for (const [paramName, pattern] of Object.entries(counterPatterns)) {
+        const match = prompt.match(pattern)
+        if (match) {
+            params[paramName] = parseFloat(match[1])
+            console.log(`  ✓ ${paramName}: ${match[1]} (counter)`)
         }
     }
 
-    if (!hasConicHead) {
-        return {
-            valid: false,
-            error: 'Countersunk screw missing conical head',
-            fixInstructions: 'Add conical head: new THREE.CylinderGeometry(0, diameter/2, height, 32)'
+    // Pattern pour dimensions (nombre APRÈS le mot avec unité)
+    const dimensionPatterns: Record<string, RegExp> = {
+        length: /(?:length|long)\s+(\d+(?:\.\d+)?)\s*mm/i,
+        diameter: /diameter\s+(\d+(?:\.\d+)?)\s*mm/i,
+        width: /width\s+(\d+(?:\.\d+)?)\s*mm/i,
+        height: /height\s+(\d+(?:\.\d+)?)\s*mm/i,
+        thickness: /(?:thickness|thick)\s+(\d+(?:\.\d+)?)\s*mm/i,
+        wallThickness: /wall\s+thickness\s+(\d+(?:\.\d+)?)\s*mm/i,
+        nodeDiameter: /node\s+diameter\s+(\d+(?:\.\d+)?)\s*mm/i,
+        ligamentThickness: /ligaments?\s+(\d+(?:\.\d+)?)\s*mm\s+thick/i,
+        strutThickness: /strut\s+thickness\s+(\d+(?:\.\d+)?)\s*mm/i,
+        proximalDiameter: /proximal\s+diameter\s+(\d+(?:\.\d+)?)\s*mm/i,
+        distalDiameter: /distal\s+diameter\s+(\d+(?:\.\d+)?)\s*mm/i,
+        size: /(\d+(?:\.\d+)?)\s*mm\s+size/i,  
+        cellSize: /unit\s+cell\s+(\d+(?:\.\d+)?)\s*mm/i,
+        depth: /depth\s+(\d+(?:\.\d+)?)\s*mm/i,
+        plenumLength: /plenum.*?(\d+(?:\.\d+)?)\s*mm/i,
+        runnerDiameter: /runner.*?(\d+(?:\.\d+)?)\s*mm.*?diameter/i,
+        runnerLength: /runner.*?(\d+(?:\.\d+)?)\s*mm.*?length/i,
+        runnerSpacing: /spaced\s+(\d+(?:\.\d+)?)\s*mm.*?apart/i,
+        diameterFrom: /from\s+(\d+(?:\.\d+)?)\s*mm.*?diameter/i,
+        diameterTo: /to\s+(\d+(?:\.\d+)?)\s*mm.*?diameter/i,
+        insertDiameter: /insert\s+(\d+(?:\.\d+)?)\s*mm/i,
+        drainDiameter: /drain.*?(\d+(?:\.\d+)?)\s*mm/i,
+        sensorDiameter: /sensor.*?(\d+(?:\.\d+)?)\s*mm/i,
+        finCount: /(\d+)\s+(?:internal\s+)?(?:cooling\s+)?fins?/i,
+        finThickness: /fins?\s+(\d+(?:\.\d+)?)\s*mm.*?thick/i,
+        portDiameter: /port\s+(\d+(?:\.\d+)?)\s*mm/i,
+        filterDiameter: /filter.*?(\d+(?:\.\d+)?)\s*mm/i,
+        tubeDiameter: /tube\s+(\d+(?:\.\d+)?)\s*mm/i,
+        portSpacingX: /rectangle\s+(\d+(?:\.\d+)?)\s*mm/i,
+        portSpacingY: /rectangle.*?x\s+(\d+(?:\.\d+)?)\s*mm/i,
+        curveRadius: /radius\s+(\d+(?:\.\d+)?)\s*mm/i,
+        injectorCount: /(\d+)\s+injector/i,
+        injectorDiameter: /injector.*?(\d+(?:\.\d+)?)\s*mm/i,
+        pilotDiameter: /pilot.*?(\d+(?:\.\d+)?)\s*mm/i,
+        outerDiameter: /outer\s+diameter\s+(\d+(?:\.\d+)?)\s*mm/i,
+        innerDiameter: /inner\s+diameter\s+(\d+(?:\.\d+)?)\s*mm/i
+    }
+
+    for (const [paramName, pattern] of Object.entries(dimensionPatterns)) {
+        if (params[paramName]) continue // Déjà extrait
+        const match = prompt.match(pattern)
+        if (match) {
+            params[paramName] = parseFloat(match[1])
+            console.log(`  ✓ ${paramName}: ${match[1]}`)
         }
     }
 
-    return { valid: true }
-}
+    // Fallback: extraire tous les nombres
+    if (!template.requiredParams) {
+        console.log('  ⚠ No required params')
+        return params
+    }
 
-function validateWormGear(code: string): ValidationResult {
-    // Chercher disque plat (ERREUR pour worm gear)
-    const hasFlatDisk = code.includes('diskGeo') && code.includes('CylinderGeometry')
+    const missing = template.requiredParams.filter(p => params[p] === undefined)
+    if (missing.length > 0) {
+        const allNumbers = [...prompt.matchAll(/\b(\d+(?:\.\d+)?)\b/g)]
+            .map(m => parseFloat(m[1]))
+            .filter(n => !isNaN(n) && n > 0)
 
-    // Chercher cylindre long
-    const hasLongCylinder = code.includes('bodyGeo') && code.includes('CylinderGeometry')
+        console.log(`  ⚠ Missing: ${missing.join(', ')} - using fallback: ${allNumbers.slice(0, missing.length).join(', ')}`)
 
-    // Chercher pattern circulaire (ERREUR)
-    const hasCircularPattern = code.includes('Math.cos(angle) * radius') &&
-        code.includes('Math.sin(angle) * radius') &&
-        !code.includes('(i / teethCount) * length')
-
-    // Chercher pattern vertical (CORRECT)
-    const hasVerticalPattern = code.includes('(i / teethCount) * length') ||
-        code.includes('i * pitch')
-
-    if (hasFlatDisk && !hasLongCylinder) {
-        return {
-            valid: false,
-            error: 'Worm gear must be LONG CYLINDER (not flat disk)',
-            fixInstructions: `Use long cylinder:
-const length = diameter * 2.5  // 2-3x longer than diameter
-const bodyGeo = new THREE.CylinderGeometry(diameter/2, diameter/2, length, 32)`
+        let idx = 0
+        for (const param of missing) {
+            if (idx < allNumbers.length) {
+                params[param] = allNumbers[idx++]
+            }
         }
     }
 
-    if (hasCircularPattern && !hasVerticalPattern) {
-        return {
-            valid: false,
-            error: 'Worm gear teeth must follow HELICAL SPIRAL (not circular)',
-            fixInstructions: `Position teeth vertically with rotation:
-for (let i = 0; i < teethCount; i++) {
-    const y = (i / teethCount) * length  // VERTICAL
-    const angle = (i / teethCount) * Math.PI * 8  // SPIRAL
-    const x = Math.cos(angle) * (diameter/2 + 1)
-    const z = Math.sin(angle) * (diameter/2 + 1)
-    // ...
-}`
-        }
+    // Détection du type de cellule unitaire
+    const cellTypePatterns: Record<string, RegExp[]> = {
+        cubic: [/\bcubic\b/i, /\bcube\b/i, /simple cubic/i],
+        bcc: [/\bbcc\b/i, /body.centered/i],
+        fcc: [/\bfcc\b/i, /face.centered/i],
+        octet: [/octet/i, /octahedral/i],
+        tetrahedral: [/tetrahedral/i, /tetra\b/i],
+        kelvin: [/kelvin/i, /tetrakaidecahedron/i],
+        diamond: [/diamond/i],
+        gyroid: [/gyroid/i, /TPMS/i]
     }
 
-    return { valid: true }
-}
-
-function validateSpurGear(code: string): ValidationResult {
-    // Validation simple
-    if (!code.includes('diskGeo') && !code.includes('CylinderGeometry')) {
-        return {
-            valid: false,
-            error: 'Spur gear must have main disk',
-            fixInstructions: 'Add: const diskGeo = new THREE.CylinderGeometry(radius, radius, thickness, 32)'
-        }
-    }
-
-    return { valid: true }
-}
-
-function validateGeneric(code: string): ValidationResult {
-    if (!code.includes('THREE.')) {
-        return { valid: false, error: 'No THREE.js geometry found' }
-    }
-
-    if (!code.includes('meshes.push')) {
-        return { valid: false, error: 'No meshes added' }
-    }
-
-    return { valid: true }
-}
-
-// ============================================
-// AGENT 1: GENERATOR (Qwen 14B)
-// ============================================
-async function generateCode(prompt: string, classification: Classification): Promise<string> {
-    const targetedExample = TARGETED_EXAMPLES[classification.type] || TARGETED_EXAMPLES['spur_gear']
-    const systemPrompt = BASE_SYSTEM_PROMPT + '\n\n' + targetedExample
-
-    console.log(`[GENERATOR] Using example: ${classification.type}`)
-
-    const body = {
-        model: MODEL,
-        stream: false,
-        messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: prompt }
-        ],
-        options: {
-            temperature: 0.1,
-            top_p: 0.85,
-            top_k: 30,
-            num_predict: 2500
-        }
-    }
-
-    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-    })
-
-    if (!response.ok) {
-        throw new Error(`Ollama error: ${response.status}`)
-    }
-
-    const data: any = await response.json()
-    return data?.message?.content || ''
-}
-
-// ============================================
-// AGENT 2: CORRECTOR (Qwen 14B)
-// ============================================
-async function correctCode(
-    prompt: string,
-    classification: Classification,
-    validation: ValidationResult
-): Promise<string> {
-    const targetedExample = TARGETED_EXAMPLES[classification.type] || ''
-
-    const correctionPrompt = `The previous code was WRONG!
-
-ERROR: ${validation.error}
-
-HOW TO FIX:
-${validation.fixInstructions}
-
-Now generate CORRECT code for: ${prompt}
-
-Follow the example EXACTLY - do not mix different object types.`
-
-    console.log(`[CORRECTOR] Fixing: ${validation.error}`)
-
-    const systemPrompt = BASE_SYSTEM_PROMPT + '\n\n' + targetedExample
-
-    const body = {
-        model: MODEL,
-        stream: false,
-        messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: correctionPrompt }
-        ],
-        options: {
-            temperature: 0.05,  // Très bas pour correction
-            top_p: 0.8,
-            top_k: 20,
-            num_predict: 2500
-        }
-    }
-
-    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-    })
-
-    if (!response.ok) {
-        throw new Error(`Ollama error: ${response.status}`)
-    }
-
-    const data: any = await response.json()
-    return data?.message?.content || ''
-}
-
-// ============================================
-// EXTRACTION & VALIDATION BASIQUE
-// ============================================
-function extractJavaScriptCode(text: string): string {
-    const markdownRegex = /```(?:javascript|js)?\s*\n([\s\S]*?)\n```/g
-    const matches = [...text.matchAll(markdownRegex)]
-
-    if (matches.length > 0) {
-        const largest = matches.map(m => m[1].trim()).sort((a, b) => b.length - a.length)[0]
-        if (largest.includes('function generateModel')) {
-            return largest
-        }
-    }
-
-    const funcMatch = text.match(/function\s+generateModel\s*\(\s*\)\s*\{[\s\S]*?\n\}/m)
-    if (funcMatch) {
-        const beforeFunc = text.substring(0, funcMatch.index)
-        const lines = beforeFunc.split('\n').reverse()
-        let startIdx = funcMatch.index
-
-        for (const line of lines) {
-            if (line.trim().startsWith('const ') || line.trim().startsWith('let ') || line.trim().startsWith('//')) {
-                startIdx = text.lastIndexOf(line, funcMatch.index)
-            } else if (line.trim().length > 0) {
+    for (const [type, patterns] of Object.entries(cellTypePatterns)) {
+        for (const pattern of patterns) {
+            if (pattern.test(prompt)) {
+                params.cellType = type
+                console.log(`  ✓ cellType: ${type}`)
                 break
             }
         }
-
-        return text.substring(startIdx, funcMatch.index + funcMatch[0].length).trim()
+        if (params.cellType) break
     }
 
-    return ''
+    console.log(`✅ Final: ${JSON.stringify(params)}\n`)
+    return params
+}
+
+// ============================================
+// GÉNÉRATION DE CODE PAR LLM (Fallback)
+// ============================================
+async function generateCodeWithLLM(prompt: string): Promise<string> {
+    const systemPrompt = `You are a THREE.js code generator. Generate simple, working code.
+
+Rules:
+- Define all variables
+- Use basic geometries (Cylinder, Box, Sphere)
+- Center at origin
+- Return complete code
+
+Format:
+\`\`\`javascript
+const size = 20
+function generateModel() {
+  const meshes = []
+  // ... code
+  return meshes
+}
+\`\`\``
+
+    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            model: MODEL,
+            stream: false,
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: prompt }
+            ],
+            options: { temperature: 0.2, num_predict: 1500 }
+        })
+    })
+
+    if (!response.ok) throw new Error('Ollama error')
+    const data: any = await response.json()
+    return data.message.content
+}
+
+// ============================================
+// EXTRACTION & VALIDATION
+// ============================================
+function extractCode(text: string): string {
+    const match = text.match(/```(?:javascript|js)?\s*\n([\s\S]*?)\n```/)
+    if (match) return match[1].trim()
+    return text.trim()
 }
 
 function isValidCode(code: string): boolean {
-    if (!code || code.length < 50) return false
-    if (!code.includes('function generateModel')) return false
-    if (!code.includes('return meshes')) return false
-    if (!code.includes('THREE.')) return false
-
-    const braceCount = (code.match(/{/g) || []).length - (code.match(/}/g) || []).length
-    return braceCount === 0
+    return code.length > 30 &&
+        code.includes('function generateModel') &&
+        code.includes('return meshes')
 }
 
 // ============================================
-// FALLBACKS
+// FALLBACK UNIVERSEL
 // ============================================
-function createFallback(type: string): string {
-    const fallbacks: Record<string, string> = {
-        countersunk_screw: `const headDiameter = 10\nconst headHeight = 3\nconst bodyDiameter = 6\nconst bodyLength = 22\n\nfunction generateModel() {\n  const meshes = []\n  const headGeo = new THREE.CylinderGeometry(0, headDiameter/2, headHeight, 32)\n  const headMat = new THREE.MeshStandardMaterial({ color: 0x888888 })\n  const head = new THREE.Mesh(headGeo, headMat)\n  head.position.y = bodyLength + headHeight/2\n  meshes.push(head)\n  const bodyGeo = new THREE.CylinderGeometry(bodyDiameter/2, bodyDiameter/2, bodyLength, 32)\n  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x888888 })\n  const body = new THREE.Mesh(bodyGeo, bodyMat)\n  body.position.y = bodyLength/2\n  meshes.push(body)\n  return meshes\n}`,
+const UNIVERSAL_FALLBACK = `
+const size = 20
+const radius = size / 2
 
-        worm_gear: `const diameter = 25\nconst length = 60\nconst teethCount = 20\n\nfunction generateModel() {\n  const meshes = []\n  const bodyGeo = new THREE.CylinderGeometry(diameter/2, diameter/2, length, 32)\n  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x888888 })\n  const body = new THREE.Mesh(bodyGeo, bodyMat)\n  body.position.y = length/2\n  meshes.push(body)\n  for (let i = 0; i < teethCount; i++) {\n    const y = (i / teethCount) * length\n    const angle = (i / teethCount) * Math.PI * 8\n    const x = Math.cos(angle) * (diameter/2 + 1)\n    const z = Math.sin(angle) * (diameter/2 + 1)\n    const threadGeo = new THREE.BoxGeometry(1.5, 3, 2)\n    const threadMat = new THREE.MeshStandardMaterial({ color: 0x666666 })\n    const thread = new THREE.Mesh(threadGeo, threadMat)\n    thread.position.set(x, y, z)\n    thread.rotation.y = angle\n    meshes.push(thread)\n  }\n  return meshes\n}`,
-
-        generic: `const size = 20\n\nfunction generateModel() {\n  const meshes = []\n  const cubeGeo = new THREE.BoxGeometry(size, size, size)\n  const cubeMat = new THREE.MeshStandardMaterial({ color: 0xFF6B6B })\n  const cube = new THREE.Mesh(cubeGeo, cubeMat)\n  cube.position.y = size/2\n  meshes.push(cube)\n  return meshes\n}`
-    }
-
-    return fallbacks[type] || fallbacks.generic
+function generateModel() {
+  const meshes = []
+  const geo = new THREE.CylinderGeometry(radius, radius, size, 32)
+  const mat = new THREE.MeshStandardMaterial({ color: 0xE8E8E8 })
+  const mesh = new THREE.Mesh(geo, mat)
+  mesh.position.y = size / 2
+  meshes.push(mesh)
+  return meshes
 }
+`.trim()
 
 // ============================================
-// ENDPOINT PRINCIPAL - ORCHESTRATEUR
+// ENDPOINT PRINCIPAL
 // ============================================
 app.post('/api/generate', async (req, res) => {
-    const startTime = Date.now()
+    const start = Date.now()
 
     try {
-        const userPrompt = String(req.body?.natural || '').trim()
-        if (!userPrompt) {
-            return res.status(400).json({ error: 'Empty prompt' })
-        }
+        const prompt = String(req.body?.natural || '').trim()
+        if (!prompt) return res.status(400).json({ error: 'Empty prompt' })
 
         console.log('\n' + '='.repeat(80))
-        console.log('📝 USER PROMPT:', userPrompt)
-        console.log('='.repeat(80))
+        console.log('PROMPT:', prompt.substring(0, 80) + '...')
 
-        // AGENT 0: Classification (instantané)
-        const classification = classifyPrompt(userPrompt)
-        console.log(`🏷️ CLASSIFICATION: ${classification.type} (confidence: ${classification.confidence})`)
+        // Sélection template
+        const templateName = selectTemplate(prompt)
 
-        // AGENT 1: Génération initiale
-        console.log('🤖 AGENT 1: Generating code...')
-        const rawResponse = await generateCode(userPrompt, classification)
-        let code = extractJavaScriptCode(rawResponse)
+        if (templateName) {
+            console.log(`✓ Template matched: ${templateName}`)
+            console.log('Extracting parameters...')
 
-        if (!isValidCode(code)) {
-            console.log('⚠️ Invalid code extracted, using fallback')
-            return res.json({
-                code: createFallback(classification.type),
-                success: true,
-                method: 'fallback_extraction',
-                classification: classification.type,
-                generationTime: Date.now() - startTime
-            })
-        }
+            const params = await extractParameters(prompt, templateName)
 
-        console.log(`✅ Code extracted: ${code.length} chars`)
-
-        // VALIDATION heuristique
-        console.log('🔍 VALIDATING code...')
-        const validation = validateCode(code, classification)
-
-        if (!validation.valid) {
-            console.log(`❌ VALIDATION FAILED: ${validation.error}`)
-
-            // AGENT 2: Correction (seulement si confiance élevée)
-            if (classification.confidence >= 0.8) {
-                console.log('🔧 AGENT 2: Attempting correction...')
-
-                const correctedResponse = await correctCode(userPrompt, classification, validation)
-                const correctedCode = extractJavaScriptCode(correctedResponse)
-
-                if (isValidCode(correctedCode)) {
-                    const revalidation = validateCode(correctedCode, classification)
-
-                    if (revalidation.valid) {
-                        console.log('✅ CORRECTION SUCCESSFUL')
-                        console.log('='.repeat(80) + '\n')
-
-                        return res.json({
-                            code: correctedCode,
-                            success: true,
-                            method: 'corrected',
-                            classification: classification.type,
-                            originalError: validation.error,
-                            generationTime: Date.now() - startTime
-                        })
-                    } else {
-                        console.log('⚠️ Correction still invalid')
-                    }
-                }
+            // Vérification: si aucun paramètre extrait, logger un avertissement
+            if (Object.keys(params).length === 0) {
+                console.log('⚠️ No parameters extracted, using template defaults')
             }
 
-            // Si correction échoue ou confiance basse, retourner code original avec warning
-            console.log('⚠️ Returning original code with validation warning')
-            console.log('='.repeat(80) + '\n')
+            const code = TEMPLATES[templateName].generate(params)
+            console.log('✓ Code generated from template')
+            console.log('='.repeat(80))
 
             return res.json({
-                code: code,
+                code,
                 success: true,
-                method: 'generated_with_warning',
-                classification: classification.type,
-                warning: validation.error,
-                generationTime: Date.now() - startTime
+                method: 'template',
+                template: templateName,
+                parameters: params,  // Renvoyer les params pour debug
+                generationTime: Date.now() - start
             })
         }
 
-        // Code valide du premier coup
-        console.log('✅ VALIDATION PASSED')
-        console.log('='.repeat(80) + '\n')
+        // Pas de template → LLM génère
+        console.log('No template matched, trying LLM generation...')
+        const rawResponse = await generateCodeWithLLM(prompt)
+        const code = extractCode(rawResponse)
 
+        if (isValidCode(code)) {
+            console.log('✓ LLM generation successful')
+            console.log('='.repeat(80))
+            return res.json({
+                code,
+                success: true,
+                method: 'llm',
+                generationTime: Date.now() - start
+            })
+        }
+
+        console.log('LLM failed, using fallback')
+        console.log('='.repeat(80))
         return res.json({
-            code: code,
+            code: UNIVERSAL_FALLBACK,
             success: true,
-            method: 'generated',
-            classification: classification.type,
-            generationTime: Date.now() - startTime
+            method: 'fallback',
+            generationTime: Date.now() - start
         })
 
     } catch (error: any) {
-        console.error('❌ ERROR:', error.message)
-
+        console.error('Error:', error.message)
         return res.json({
-            code: createFallback('generic'),
+            code: UNIVERSAL_FALLBACK,
             success: true,
             method: 'error_fallback',
             error: error.message
@@ -683,23 +322,27 @@ app.post('/api/generate', async (req, res) => {
     }
 })
 
-// Health check
 app.get('/api/health', (req, res) => {
     res.json({
         status: 'ok',
         model: MODEL,
-        version: '8.0-multi-agent-hybrid',
-        agents: ['classifier', 'generator', 'validator', 'corrector']
+        version: '12.0-template-based',
+        templates: Object.keys(TEMPLATES)
     })
 })
 
 app.listen(PORT, () => {
     console.log('\n' + '='.repeat(80))
-    console.log('🚀 CAD SERVER v8.0 - MULTI-AGENT HYBRIDE')
+    console.log('CAD SERVER v12.0 - TEMPLATE-BASED SYSTEM')
     console.log('='.repeat(80))
-    console.log(`   URL:           http://localhost:${PORT}`)
-    console.log(`   Model:         ${MODEL}`)
-    console.log(`   Architecture:  Classifier + Generator + Validator + Corrector`)
+    console.log(`URL: http://localhost:${PORT}`)
+    console.log(`Model: ${MODEL}`)
+    console.log(`Templates: ${Object.keys(TEMPLATES).length}`)
+    console.log('  - ellipsoid_implant')
+    console.log('  - hemispherical_capsule')
+    console.log('  - zigzag_stent')
+    console.log('  - soft_actuator')
+    console.log('  - lattice_cube')
     console.log('='.repeat(80))
-    console.log('\n✅ Serveur prêt - Taux de réussite attendu: 85-90%\n')
+    console.log('\nReady - Template-based + LLM fallback\n')
 })
