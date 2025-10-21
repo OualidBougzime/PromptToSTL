@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CADAM-X - Multi-Application CAD Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.150.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.150.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        @keyframes pulse {
+            0%,100% {
+                opacity: 1
+            }
+
+            50% {
+                opacity: .5
+            }
+        }
+
+        .pulse {
+            animation: pulse 1.8s infinite
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-gray-900 via-blue-900 to-purple-900 min-h-screen">
+    <div class="container mx-auto p-6 max-w-7xl">
+        <div class="text-center mb-6">
+            <h1 class="text-4xl md:text-6xl font-bold bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent">
+                CADAM-X
+            </h1>
+            <p class="text-blue-300 mt-2">AI-Powered Multi-Application CAD Generation</p>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Left panel -->
+            <div class="space-y-6">
+                <div class="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+                    <h2 class="text-2xl font-bold text-white mb-3">Application Type</h2>
+
+                    <!-- Type Selector -->
+                    <div class="mb-4">
+                        <label class="text-sm text-gray-300 mb-2 block">Choose Application:</label>
+                        <select id="appType" onchange="updateExamplesList()"
+                                class="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white font-semibold">
+                            <option value="splint">Hand Splint / Orthosis</option>
+                            <option value="stent">Vascular Stent</option>
+                            <option value="lattice">Lattice Structure</option>
+                            <option value="facade">Architectural Facades</option>
+                            <option value="gripper">Medical Gripper</option>
+                            <option value="heatsink">Heatsink / Cooling Fins</option>
+                        </select>
+                    </div>
+
+                    <!-- Variant Selector -->
+                    <div class="mb-4">
+                        <label class="text-sm text-gray-300 mb-2 block">Choose Variant:</label>
+                        <select id="exampleVariant"
+                                class="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white font-semibold">
+                        </select>
+                    </div>
+
+                    <!-- Load Example Button -->
+                    <button onclick="loadSelectedExample()"
+                            class="w-full py-2 bg-blue-600/50 hover:bg-blue-600 text-white rounded-lg mb-4 transition">
+                        Load Selected Example
+                    </button>
+
+                    <h3 class="text-lg font-bold text-white mb-2">Design Input</h3>
+                    <textarea id="prompt" rows="12"
+                              class="w-full p-4 bg-white/5 border border-white/20 rounded-lg text-white placeholder-white/50 font-mono text-sm"
+                              placeholder="Describe your CAD model in detail...">Create a resting hand splint for wrist immobilization with three anatomically-connected sections:
+
+SECTION 1 - Forearm support:
+- Length: 150mm
+- Width: tapers from 70mm at proximal end to 60mm at wrist
+- Curvature: 5mm palmar curve for natural wrist position
+
+SECTION 2 - Palm platform:
+- Length: 80mm
+- Width: constant 75mm (widest section)
+- Angle: 20 degrees upward extension from forearm axis
+- Curvature: 8mm transverse arch for palm contour
+
+SECTION 3 - Finger support:
+- Length: 40mm
+- Width: constant 65mm
+- Position: continues palm angle
+- Curvature: 3mm for MCP joint clearance
+
+MATERIAL & STRUCTURE:
+- Wall thickness: 3.5mm for rigidity
+- Smooth filleted transitions: 8mm radius between all sections
+- Total assembled length: 270mm
+
+VENTILATION:
+- Perforation pattern: 6mm diameter holes
+- Grid layout: 10 columns × 3 rows
+
+STRAP ATTACHMENT:
+- 3 slots for velcro straps
+- Slot dimensions: 25mm wide × 3mm deep
+- Positions: 50mm, 150mm, 220mm from proximal end</textarea>
+
+                    <div class="grid grid-cols-2 gap-3 mt-3">
+                        <button id="generateBtn" onclick="generateCAD()"
+                                class="py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg font-bold hover:scale-105 transition">
+                            Generate CAD
+                        </button>
+                        <button onclick="resetView()" class="py-3 bg-white/10 text-white rounded-lg">Reset View</button>
+                    </div>
+
+                    <div id="progress" class="mt-4 hidden">
+                        <div class="flex justify-between text-white mb-2">
+                            <span id="statusText" class="text-sm">Processing...</span>
+                            <span id="progressPercent" class="text-sm">0%</span>
+                        </div>
+                        <div class="w-full bg-white/20 rounded-full h-3 overflow-hidden">
+                            <div id="progressBar" class="bg-gradient-to-r from-blue-500 to-green-500 h-3 rounded-full transition-all duration-500" style="width:0%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right panel -->
+            <div class="lg:col-span-2">
+                <div class="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-2xl font-bold text-white">3D Preview</h2>
+                        <div class="flex gap-2">
+                            <button onclick="toggleWireframe()" class="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white" title="Toggle Wireframe">Wireframe</button>
+                            <button onclick="toggleAxes()" class="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white" title="Toggle Axes">Axes</button>
+                        </div>
+                    </div>
+                    <div id="viewer" class="w-full h-[520px] bg-black/30 rounded-lg relative">
+                        <div id="loadingIndicator" class="absolute inset-0 flex items-center justify-center hidden">
+                            <div class="text-white pulse">Loading 3D Model...</div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-3 gap-4 mt-4">
+                        <button onclick="exportSTL()" class="py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg">Export STL</button>
+                        <button onclick="exportCode()" class="py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg">Export Code</button>
+                        <button onclick="exportSTEP()" class="py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg">Export STEP</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Error Modal -->
+        <div id="errorModal" class="fixed inset-0 bg-black/50 flex items-center justify-center hidden z-50">
+            <div class="bg-gray-800 rounded-xl p-6 max-w-md border border-red-500/50">
+                <h3 class="text-xl font-bold text-red-400 mb-3">Error</h3>
+                <p id="errorMessage" class="text-gray-300 mb-4"></p>
+                <button onclick="closeError()" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

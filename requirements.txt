@@ -1,0 +1,26 @@
+# FastAPI et serveur web
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+python-multipart==0.0.6
+
+# CAD et géométrie - ESSENTIELS
+cadquery==2.4.0
+scipy==1.11.4
+numpy==1.26.2
+
+# NURBS avancés (optionnel mais recommandé)
+geomdl==5.3.1
+
+requests==2.31.0
+
+# Traitement de mesh avancé (optionnel)
+# Décommenter si vous voulez des fonctionnalités avancées
+# trimesh==4.0.5
+# open3d==0.18.0
+
+# Dépendances système requises (installer via apt/yum):
+# - python3-dev
+# - libfreetype6-dev
+# - libgl1-mesa-dev
+# - libglu1-mesa-dev
