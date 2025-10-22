@@ -18,10 +18,8 @@ requests==2.31.0
 aiohttp==3.9.1
 python-dotenv==1.0.0
 
-# HuggingFace (optionnel - pour LLM inference)
-# huggingface-hub==0.19.4
-# transformers==4.35.2
-# Note: Les modèles LLM sont utilisés via API inference (pas besoin de télécharger les modèles)
+# Ollama pour LLM local (remplace HuggingFace)
+ollama==0.3.3
 
 # Traitement de mesh avancé (optionnel)
 # Décommenter si vous voulez des fonctionnalités avancées
