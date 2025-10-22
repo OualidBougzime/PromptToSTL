@@ -98,7 +98,7 @@ class OllamaCoTClient:
             return await self._fallback_generate(messages)
 
     async def _fallback_generate(self, messages: List[Dict[str, str]]) -> str:
-        """Fallback basique si OpenAI non disponible"""
+        """Fallback basique si Ollama non disponible"""
         # Extraire le dernier message utilisateur
         user_msg = ""
         for msg in reversed(messages):
@@ -125,7 +125,7 @@ class ArchitectAgent:
     """
     🏗️ ARCHITECT AGENT
     Rôle: Analyser la demande et raisonner sur le design (Chain-of-Thought)
-    Utilise: GPT-4 pour raisonnement complexe
+    Utilise: Qwen2.5 14B (Ollama) pour raisonnement complexe
     """
 
     def __init__(self):
