@@ -14,6 +14,15 @@ geomdl==5.3.1
 
 requests==2.31.0
 
+# Multi-Agent System & AI
+aiohttp==3.9.1
+python-dotenv==1.0.0
+
+# HuggingFace (optionnel - pour LLM inference)
+# huggingface-hub==0.19.4
+# transformers==4.35.2
+# Note: Les modèles LLM sont utilisés via API inference (pas besoin de télécharger les modèles)
+
 # Traitement de mesh avancé (optionnel)
 # Décommenter si vous voulez des fonctionnalités avancées
 # trimesh==4.0.5

@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 
 from agents import AnalystAgent, GeneratorAgent, ValidatorAgent
+from multi_agent_system import OrchestratorAgent
 
 # ========== CONFIGURATION ==========
 logging.basicConfig(level=logging.INFO)
@@ -26,10 +27,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Agents
+# Agents (3 existants)
 analyst = AnalystAgent()
 generator = GeneratorAgent()
 validator = ValidatorAgent()
+
+# Orchestrateur (coordonne les 9 agents: 3 existants + 6 nouveaux)
+orchestrator = OrchestratorAgent(analyst, generator, validator)
 
 # Stockage temporaire des derniers fichiers générés
 _last_stl_path: Optional[str] = None
@@ -94,90 +98,78 @@ async def generate_endpoint(request: GenerateRequest):
     
     async def event_stream():
         try:
-            # === PHASE 1: ANALYSE ===
-            log.info(f"Analyzing prompt: {request.prompt[:100]}...")
-            yield await send_sse_event("status", {
-                "message": "Analyzing prompt...",
-                "progress": 10
-            })
-            
-            analysis = await analyst.analyze(request.prompt)
-            app_type = analysis.get('type', 'splint')
-            _last_app_type = app_type
-            
-            yield await send_sse_event("status", {
-                "message": f"Detected: {app_type.upper()}",
-                "progress": 25
-            })
-            
-            # === PHASE 2: GENERATION ===
-            log.info("Generating code...")
-            yield await send_sse_event("status", {
-                "message": "Generating code...",
-                "progress": 40
-            })
-            
-            code, detected_type = await generator.generate(analysis)
-            
-            # Envoyer le code (échappé pour JSON)
-            yield await send_sse_event("code", {
-                "code": escape_for_json(code),
-                "app_type": detected_type,
-                "progress": 60
-            })
-            
-            # === PHASE 3: VALIDATION ET EXECUTION ===
-            log.info("Validating and executing...")
-            yield await send_sse_event("status", {
-                "message": "Validating and executing...",
-                "progress": 75
-            })
-            
-            result = await validator.validate_and_execute(code, detected_type)
-            
+            log.info(f"🚀 Starting multi-agent workflow for prompt: {request.prompt[:100]}...")
+
+            # Liste pour collecter les événements de progression
+            progress_events = []
+
+            # Callback pour envoyer les événements de progression
+            async def progress_callback(event_type: str, data: dict):
+                if event_type == "code":
+                    # Échapper le code pour JSON
+                    data["code"] = escape_for_json(data.get("code", ""))
+                event = await send_sse_event(event_type, data)
+                progress_events.append(event)
+
+            # Exécuter le workflow orchestré avec les 9 agents
+            result = await orchestrator.execute_workflow(
+                request.prompt,
+                progress_callback=progress_callback
+            )
+
+            # Envoyer tous les événements de progression
+            for event in progress_events:
+                yield event
+
             if result["success"]:
                 # Succès - stocker les paths
                 _last_stl_path = result.get("stl_path")
                 _last_step_path = result.get("step_path")
-                
-                log.info(f"Generation successful!")
+                _last_app_type = result.get("app_type", "model")
+
+                log.info(f"✅ Multi-agent generation successful!")
                 if _last_stl_path:
                     log.info(f"  STL: {_last_stl_path}")
                 if _last_step_path:
                     log.info(f"  STEP: {_last_step_path}")
-                
+
                 # Envoyer résultat final
                 response_data = {
                     "success": True,
                     "mesh": result.get("mesh"),
                     "analysis": result.get("analysis"),
-                    "code": code,  # Code non échappé pour le résultat final
-                    "app_type": detected_type,
+                    "code": result.get("code"),  # Code non échappé pour le résultat final
+                    "app_type": result.get("app_type"),
                     "progress": 100
                 }
-                
-                # Ajouter les paths si disponibles (pour info frontend)
+
+                # Ajouter les paths si disponibles
                 if _last_stl_path:
                     response_data["stl_path"] = _last_stl_path
                 if _last_step_path:
                     response_data["step_path"] = _last_step_path
-                
+
+                # Ajouter les métadonnées du système multi-agent
+                if "metadata" in result:
+                    response_data["metadata"] = result["metadata"]
+
                 yield await send_sse_event("complete", response_data)
-                
+
             else:
-                # Erreur de validation/exécution
-                errors = result.get("errors", ["Unknown validation error"])
-                log.error(f"Validation failed: {errors}")
-                
+                # Erreur - les agents ont géré l'erreur
+                errors = result.get("errors", ["Unknown error"])
+                log.error(f"❌ Multi-agent workflow failed: {errors}")
+
                 yield await send_sse_event("error", {
                     "success": False,
                     "errors": errors,
-                    "progress": 0
+                    "progress": 0,
+                    "metadata": result.get("metadata", {})
                 })
-        
+
         except Exception as e:
-            # Erreur générale
-            log.error(f"Generation error: {e}", exc_info=True)
+            # Erreur générale non capturée
+            log.error(f"❌ Orchestrator error: {e}", exc_info=True)
             yield await send_sse_event("error", {
                 "success": False,
                 "errors": [str(e)],
