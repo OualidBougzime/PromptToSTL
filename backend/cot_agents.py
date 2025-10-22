@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-cot_agents.py - Chain-of-Thought Agents for Universal CAD Generation
-Permet de générer N'IMPORTE QUELLE forme, pas juste les templates prédéfinis
+Chain-of-Thought agents pour générer n'importe quelle forme CAD.
+Pas besoin de templates prédéfinis - le système analyse et génère du code
+pour tout ce qu'on lui demande (engrenages, supports, boîtiers, etc.)
 """
 
 import os
@@ -14,22 +15,21 @@ from dataclasses import dataclass
 log = logging.getLogger("cadamx.cot_agents")
 
 
-# ========== DATA CLASSES ==========
-
+# Classes de données pour structurer les résultats entre agents
 @dataclass
 class DesignAnalysis:
-    """Résultat de l'analyse architecturale"""
+    """Ce que l'architect agent comprend de la demande"""
     description: str
-    primitives_needed: List[str]
+    primitives_needed: List[str]  # box, cylinder, sphere, etc.
     operations_sequence: List[str]
     parameters: Dict[str, Any]
-    complexity: str  # "simple", "medium", "complex"
+    complexity: str  # simple, medium ou complex
     reasoning: str
 
 
 @dataclass
 class ConstructionPlan:
-    """Plan de construction détaillé"""
+    """Plan étape par étape pour construire la pièce"""
     steps: List[Dict[str, Any]]
     variables: Dict[str, Any]
     constraints: List[str]
@@ -38,17 +38,18 @@ class ConstructionPlan:
 
 @dataclass
 class GeneratedCode:
-    """Code généré avec métadonnées"""
+    """Code Python/CadQuery final avec quelques infos"""
     code: str
     language: str
     primitives_used: List[str]
     confidence: float
 
 
-# ========== OLLAMA CLIENT FOR COT ==========
-
 class OllamaCoTClient:
-    """Client Ollama pour Chain-of-Thought (génération universelle)"""
+    """
+    Client pour parler avec Ollama en mode chat.
+    On utilise Ollama plutôt qu'une API payante pour rester 100% local et gratuit.
+    """
 
     def __init__(self, model: str, base_url: Optional[str] = None):
         self.model = model
@@ -98,7 +99,7 @@ class OllamaCoTClient:
             return await self._fallback_generate(messages)
 
     async def _fallback_generate(self, messages: List[Dict[str, str]]) -> str:
-        """Fallback basique si OpenAI non disponible"""
+        """Fallback basique si Ollama non disponible"""
         # Extraire le dernier message utilisateur
         user_msg = ""
         for msg in reversed(messages):
@@ -119,26 +120,21 @@ class OllamaCoTClient:
         return "Create basic shape using CadQuery primitives: workplane, box, circle, extrude."
 
 
-# ========== AGENT 1: ARCHITECT (Chain-of-Thought) ==========
-
 class ArchitectAgent:
     """
-    🏗️ ARCHITECT AGENT
-    Rôle: Analyser la demande et raisonner sur le design (Chain-of-Thought)
-    Utilise: GPT-4 pour raisonnement complexe
+    Premier agent : analyse ce que l'utilisateur veut vraiment.
+    Utilise Qwen2.5 14B pour comprendre et décomposer le problème.
     """
 
     def __init__(self):
         model = os.getenv("COT_ARCHITECT_MODEL", "qwen2.5:14b")
         self.client = OllamaCoTClient(model=model)
-        log.info("🏗️ ArchitectAgent (Chain-of-Thought) initialized")
+        log.info("🏗️ ArchitectAgent initialized")
 
     async def analyze_design(self, prompt: str) -> DesignAnalysis:
-        """
-        Analyse la demande utilisateur avec raisonnement Chain-of-Thought
-        """
+        """Analyse la demande et figure out comment construire ça"""
 
-        log.info(f"🏗️ Analyzing design with CoT: {prompt[:100]}...")
+        log.info(f"🏗️ Analyzing: {prompt[:100]}...")
 
         system_prompt = """You are an expert CAD architect. Your role is to analyze user requests for 3D shapes and reason about how to construct them.
 
@@ -200,12 +196,10 @@ Output your analysis in this JSON format:
             )
 
 
-# ========== AGENT 2: PLANNER ==========
-
 class PlannerAgent:
     """
-    📐 PLANNER AGENT
-    Rôle: Décomposer en étapes de construction détaillées
+    Deuxième agent : prend l'analyse et la transforme en plan étape par étape.
+    Utilise Qwen2.5-Coder 14B qui est bon pour ce genre de tâches.
     """
 
     def __init__(self):
@@ -214,11 +208,9 @@ class PlannerAgent:
         log.info("📐 PlannerAgent initialized")
 
     async def create_plan(self, analysis: DesignAnalysis, prompt: str) -> ConstructionPlan:
-        """
-        Crée un plan de construction détaillé à partir de l'analyse
-        """
+        """Transforme l'analyse en plan concret avec des étapes CadQuery"""
 
-        log.info(f"📐 Creating construction plan for: {analysis.description}")
+        log.info(f"📐 Planning: {analysis.description}")
 
         system_prompt = """You are a CAD construction planner. Given an architectural analysis, create a detailed step-by-step construction plan for CadQuery.
 
@@ -299,12 +291,10 @@ Original prompt: {prompt}
             )
 
 
-# ========== AGENT 3: CODE SYNTHESIZER ==========
-
 class CodeSynthesizerAgent:
     """
-    💻 CODE SYNTHESIZER AGENT
-    Rôle: Générer du code CadQuery à partir du plan de construction
+    Dernier agent : génère le code Python/CadQuery qui va vraiment créer la pièce.
+    DeepSeek-Coder 33B est excellent pour ça - c'est un des meilleurs modèles code open-source.
     """
 
     def __init__(self):
@@ -313,11 +303,9 @@ class CodeSynthesizerAgent:
         log.info("💻 CodeSynthesizerAgent initialized")
 
     async def generate_code(self, plan: ConstructionPlan, analysis: DesignAnalysis) -> GeneratedCode:
-        """
-        Génère le code CadQuery final à partir du plan
-        """
+        """Génère le vrai code CadQuery exécutable"""
 
-        log.info(f"💻 Synthesizing CadQuery code for: {analysis.description}")
+        log.info(f"💻 Generating code: {analysis.description}")
 
         system_prompt = """You are an expert CadQuery code generator. Generate clean, working CadQuery code based on the construction plan.
 

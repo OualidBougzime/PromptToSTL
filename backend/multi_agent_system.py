@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-multi_agent_system.py - Système Multi-Agent Intelligent pour CAD
-Architecture: 12 agents (3 existants + 6 multi-agent + 3 Chain-of-Thought)
+Système multi-agent pour la génération CAD.
+12 agents qui travaillent ensemble : validation, génération, correction d'erreurs, etc.
+Les agents CoT permettent de générer n'importe quelle forme, pas juste les templates.
 """
 
 import os
@@ -13,16 +14,13 @@ from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
-# Import Chain-of-Thought agents
 from cot_agents import ArchitectAgent, PlannerAgent, CodeSynthesizerAgent
 
 log = logging.getLogger("cadamx.multi_agent")
 
 
-# ========== ENUMS & DATA CLASSES ==========
-
 class AgentStatus(Enum):
-    """Statut d'exécution d'un agent"""
+    """Status d'un agent (pending, running, success, failed, retry)"""
     PENDING = "pending"
     RUNNING = "running"
     SUCCESS = "success"
@@ -32,7 +30,7 @@ class AgentStatus(Enum):
 
 @dataclass
 class AgentResult:
-    """Résultat d'exécution d'un agent"""
+    """Ce qu'un agent retourne après son exécution"""
     status: AgentStatus
     data: Any = None
     errors: List[str] = None
