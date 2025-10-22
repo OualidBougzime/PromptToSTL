@@ -11,11 +11,11 @@ Ce système transforme la génération CAD basique en un pipeline intelligent or
 
 ### **Nouveaux Agents (6)**
 4. **OrchestratorAgent** 🎯 - Coordonne le pipeline complet avec retry intelligent
-5. **DesignExpertAgent** 🎨 - Valide les règles métier par type CAD (LLM: Mistral-7B)
+5. **DesignExpertAgent** 🎨 - Valide les règles métier par type CAD (LLM: Qwen2.5-Coder 7B via Ollama)
 6. **ConstraintValidatorAgent** ⚖️ - Vérifie les contraintes de fabrication
 7. **SyntaxValidatorAgent** ✅ - Vérifie la syntaxe du code avant exécution
 8. **ErrorHandlerAgent** 🚨 - Gère les erreurs de façon intelligente
-9. **SelfHealingAgent** 🩹 - Corrige automatiquement les erreurs (LLM: StarCoder2-15B)
+9. **SelfHealingAgent** 🩹 - Corrige automatiquement les erreurs (LLM: DeepSeek-Coder 6.7B via Ollama)
 
 ---
 
@@ -97,34 +97,64 @@ User → Orchestrator → [9 Agents] → STL
 
 ## 🔧 Configuration
 
-### 1. Variables d'Environnement (`.env`)
+### 1. Installer Ollama
+
+**Étape 1: Installer Ollama sur votre machine**
+
+Visitez [ollama.ai](https://ollama.ai) et installez Ollama pour votre système.
+
+**Étape 2: Télécharger les modèles recommandés**
+
+```bash
+# Modèle pour Design Expert (validation des règles métier)
+ollama pull qwen2.5-coder:7b
+
+# Modèle pour Self-Healing (correction de code)
+ollama pull deepseek-coder:6.7b
+```
+
+**Modèles alternatifs disponibles:**
+- `codellama:7b` - Excellent pour le code Python/CAD
+- `llama3.1:8b` - Très bon pour la compréhension générale
+- `qwen2.5-coder:14b` - Version plus performante (nécessite plus de RAM)
+
+**Étape 3: Lancer Ollama**
+
+```bash
+ollama serve
+```
+
+### 2. Variables d'Environnement (`.env`)
 
 ```bash
 # ===== MULTI-AGENT SYSTEM CONFIGURATION =====
 
-# HuggingFace API Token (optionnel)
-# Obtenez votre token sur: https://huggingface.co/settings/tokens
-HUGGINGFACE_API_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxx
+# Ollama Configuration (Local LLM)
+# Assurez-vous qu'Ollama est lancé: ollama serve
+OLLAMA_BASE_URL=http://localhost:11434
 
 # Design Expert Agent - Validation des règles métier
-DESIGN_EXPERT_MODEL=mistralai/Mistral-7B-Instruct-v0.3
+# Modèles recommandés: qwen2.5-coder:7b, codellama:7b, llama3.1:8b
+DESIGN_EXPERT_MODEL=qwen2.5-coder:7b
 
 # Self-Healing Agent - Correction automatique de code
-CODE_LLM_MODEL=bigcode/starcoder2-15b
+# Modèles recommandés: deepseek-coder:6.7b, codellama:7b, qwen2.5-coder:7b
+CODE_LLM_MODEL=deepseek-coder:6.7b
 
 # Multi-Agent System Settings
 MAX_RETRIES=3
 AGENT_TIMEOUT=30
 ```
 
-### 2. Installation des Dépendances
+### 3. Installation des Dépendances Python
 
 ```bash
 pip install -r requirements.txt
 ```
 
 **Nouvelles dépendances ajoutées:**
-- `aiohttp` - Pour les appels API HuggingFace
+- `ollama` - Client Python pour Ollama (local LLM)
+- `aiohttp` - Pour les appels API asynchrones
 - `python-dotenv` - Pour charger les variables d'environnement
 
 ---
@@ -151,7 +181,7 @@ pip install -r requirements.txt
 ### 🎨 **2. DesignExpertAgent** (CRITIQUE)
 **Rôle:** Valider les règles métier par type CAD
 
-**LLM:** `mistralai/Mistral-7B-Instruct-v0.3`
+**LLM:** `qwen2.5-coder:7b` (via Ollama)
 
 **Règles Métier par Type:**
 
@@ -225,7 +255,7 @@ pip install -r requirements.txt
 ### 🩹 **6. SelfHealingAgent** (MOYENNE)
 **Rôle:** Corriger automatiquement les erreurs de code
 
-**LLM:** `bigcode/starcoder2-15b`
+**LLM:** `deepseek-coder:6.7b` (via Ollama)
 
 **Stratégie de Correction:**
 
@@ -456,12 +486,14 @@ HUGGINGFACE_API_TOKEN=
 
 ## 📚 Ressources
 
-- **HuggingFace Models:**
-  - [Mistral-7B-Instruct-v0.3](https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3)
-  - [StarCoder2-15B](https://huggingface.co/bigcode/starcoder2-15b)
+- **Ollama:**
+  - [Ollama Official Site](https://ollama.ai)
+  - [Qwen2.5-Coder Models](https://ollama.com/library/qwen2.5-coder)
+  - [DeepSeek-Coder Models](https://ollama.com/library/deepseek-coder)
+  - [CodeLlama Models](https://ollama.com/library/codellama)
 
 - **Documentation:**
-  - [HuggingFace Inference API](https://huggingface.co/docs/api-inference/index)
+  - [Ollama Python Library](https://github.com/ollama/ollama-python)
   - [FastAPI Async](https://fastapi.tiangolo.com/async/)
 
 ---

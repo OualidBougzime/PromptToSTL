@@ -61,64 +61,55 @@ class WorkflowContext:
             self.errors = []
 
 
-# ========== HUGGING FACE LLM CLIENT ==========
+# ========== OLLAMA LLM CLIENT ==========
 
-class HuggingFaceLLM:
-    """Client pour interagir avec les modèles HuggingFace"""
+class OllamaLLM:
+    """Client pour interagir avec les modèles Ollama (local)"""
 
-    def __init__(self, model_name: str, api_token: Optional[str] = None):
+    def __init__(self, model_name: str, base_url: Optional[str] = None):
         self.model_name = model_name
-        self.api_token = api_token or os.getenv("HUGGINGFACE_API_TOKEN", "")
-        self.api_url = f"https://api-inference.huggingface.co/models/{model_name}"
+        self.base_url = base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        self.use_fallback = False
 
-        # Fallback: mode local si pas de token
-        self.use_local = not self.api_token
-
-        if self.use_local:
-            log.warning(f"⚠️ No HF token, using fallback mode for {model_name}")
-        else:
-            log.info(f"✅ HuggingFace LLM initialized: {model_name}")
+        try:
+            import ollama
+            self.client = ollama.AsyncClient(host=self.base_url)
+            log.info(f"✅ Ollama LLM initialized: {model_name} @ {self.base_url}")
+        except ImportError:
+            log.error("⚠️ Ollama package not installed, using fallback mode")
+            self.use_fallback = True
+        except Exception as e:
+            log.warning(f"⚠️ Ollama connection failed: {e}, using fallback mode")
+            self.use_fallback = True
 
     async def generate(self, prompt: str, max_tokens: int = 512, temperature: float = 0.7) -> str:
         """Génère une réponse avec le modèle LLM"""
 
-        if self.use_local:
-            # Mode fallback sans API
+        if self.use_fallback:
             return await self._fallback_generate(prompt)
 
         try:
-            import aiohttp
+            import ollama
 
-            headers = {"Authorization": f"Bearer {self.api_token}"}
-            payload = {
-                "inputs": prompt,
-                "parameters": {
-                    "max_new_tokens": max_tokens,
+            response = await self.client.generate(
+                model=self.model_name,
+                prompt=prompt,
+                options={
+                    "num_predict": max_tokens,
                     "temperature": temperature,
                     "top_p": 0.9,
-                    "do_sample": True
                 }
-            }
+            )
 
-            async with aiohttp.ClientSession() as session:
-                async with session.post(self.api_url, headers=headers, json=payload, timeout=30) as response:
-                    if response.status == 200:
-                        result = await response.json()
+            # Ollama retourne un dict avec 'response'
+            if isinstance(response, dict):
+                return response.get("response", "").strip()
 
-                        # Format de réponse HF
-                        if isinstance(result, list) and len(result) > 0:
-                            return result[0].get("generated_text", "")
-                        elif isinstance(result, dict):
-                            return result.get("generated_text", "")
-
-                        return str(result)
-                    else:
-                        error_text = await response.text()
-                        log.error(f"HF API error {response.status}: {error_text}")
-                        return await self._fallback_generate(prompt)
+            return str(response).strip()
 
         except Exception as e:
-            log.error(f"HF API call failed: {e}")
+            log.error(f"Ollama API call failed: {e}")
+            log.warning("Falling back to heuristic mode")
             return await self._fallback_generate(prompt)
 
     async def _fallback_generate(self, prompt: str) -> str:
@@ -418,8 +409,8 @@ class DesignExpertAgent:
     """
 
     def __init__(self):
-        model_name = os.getenv("DESIGN_EXPERT_MODEL", "mistralai/Mistral-7B-Instruct-v0.3")
-        self.llm = HuggingFaceLLM(model_name)
+        model_name = os.getenv("DESIGN_EXPERT_MODEL", "qwen2.5-coder:7b")
+        self.llm = OllamaLLM(model_name)
 
         # Règles métier par type CAD
         self.design_rules = {
@@ -831,8 +822,8 @@ class SelfHealingAgent:
     """
 
     def __init__(self):
-        model_name = os.getenv("CODE_LLM_MODEL", "bigcode/starcoder2-15b")
-        self.llm = HuggingFaceLLM(model_name)
+        model_name = os.getenv("CODE_LLM_MODEL", "deepseek-coder:6.7b")
+        self.llm = OllamaLLM(model_name)
 
         log.info("🩹 SelfHealingAgent initialized")
 
