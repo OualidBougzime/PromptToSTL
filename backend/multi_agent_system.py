@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 multi_agent_system.py - Système Multi-Agent Intelligent pour CAD
-Architecture: 9 agents (3 existants + 6 nouveaux)
+Architecture: 12 agents (3 existants + 6 multi-agent + 3 Chain-of-Thought)
 """
 
 import os
@@ -12,6 +12,9 @@ import asyncio
 from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass
 from enum import Enum
+
+# Import Chain-of-Thought agents
+from cot_agents import ArchitectAgent, PlannerAgent, CodeSynthesizerAgent
 
 log = logging.getLogger("cadamx.multi_agent")
 
@@ -158,14 +161,45 @@ class OrchestratorAgent:
         self.generator = generator_agent
         self.validator = validator_agent
 
-        # Nouveaux agents
+        # Agents multi-agent (6)
         self.design_expert = DesignExpertAgent()
         self.constraint_validator = ConstraintValidatorAgent()
         self.syntax_validator = SyntaxValidatorAgent()
         self.error_handler = ErrorHandlerAgent()
         self.self_healing = SelfHealingAgent()
 
-        log.info("🎯 OrchestratorAgent initialized")
+        # Agents Chain-of-Thought (3) - Pour formes universelles
+        self.architect = ArchitectAgent()
+        self.planner = PlannerAgent()
+        self.code_synthesizer = CodeSynthesizerAgent()
+
+        # Types connus supportés par templates
+        self.known_types = {
+            "splint", "stent", "lattice", "heatsink",
+            "honeycomb", "gripper", "facade_pyramid", "facade_parametric"
+        }
+
+        log.info("🎯 OrchestratorAgent initialized (12 agents: 3 base + 6 multi-agent + 3 CoT)")
+
+    def _should_use_cot(self, analysis: Dict[str, Any]) -> bool:
+        """
+        Détermine si on doit utiliser Chain-of-Thought (formes universelles)
+        ou Templates (types connus)
+
+        Returns:
+            True si on doit utiliser CoT (forme inconnue)
+            False si on peut utiliser un template (forme connue)
+        """
+        app_type = analysis.get("type", "unknown")
+
+        # Si le type est inconnu ou si l'analyst n'est pas confiant
+        if app_type == "unknown" or app_type not in self.known_types:
+            log.info(f"🧠 Type '{app_type}' inconnu → Utilisation Chain-of-Thought")
+            return True
+
+        # Si type connu, utiliser template
+        log.info(f"⚡ Type '{app_type}' connu → Utilisation Template")
+        return False
 
     async def execute_workflow(self, prompt: str, progress_callback=None) -> Dict[str, Any]:
         """
@@ -222,22 +256,69 @@ class OrchestratorAgent:
 
             context.constraints_validation = result.data
 
-            # PHASE 4: Génération de code (Agent existant)
-            if progress_callback:
-                await progress_callback("status", {"message": "💻 Generating code...", "progress": 45})
+            # PHASE 4: Génération de code - ROUTING: Template vs Chain-of-Thought
+            use_cot = self._should_use_cot(context.analysis)
 
-            result = await self._execute_with_retry(
-                self.generator.generate,
-                context,
-                "Code Generation",
-                context.analysis
-            )
+            if use_cot:
+                # ========== CHAIN-OF-THOUGHT PATHWAY (Formes universelles) ==========
+                log.info("🧠 Using Chain-of-Thought agents for universal shape generation")
 
-            if result.status != AgentStatus.SUCCESS:
-                return self._build_error_response(context, "Code generation failed")
+                # PHASE 4a: Architect Agent - Raisonnement sur le design
+                if progress_callback:
+                    await progress_callback("status", {"message": "🏗️ Architect analyzing design...", "progress": 40})
 
-            code, detected_type = result.data
-            context.generated_code = code
+                try:
+                    design_analysis = await self.architect.analyze_design(prompt)
+                    log.info(f"🏗️ Architect: {design_analysis.description} (complexity: {design_analysis.complexity})")
+                except Exception as e:
+                    log.error(f"Architect failed: {e}")
+                    return self._build_error_response(context, f"Architect analysis failed: {e}")
+
+                # PHASE 4b: Planner Agent - Plan de construction
+                if progress_callback:
+                    await progress_callback("status", {"message": "📐 Planner creating construction plan...", "progress": 50})
+
+                try:
+                    construction_plan = await self.planner.create_plan(design_analysis, prompt)
+                    log.info(f"📐 Planner: {len(construction_plan.steps)} steps (complexity: {construction_plan.estimated_complexity})")
+                except Exception as e:
+                    log.error(f"Planner failed: {e}")
+                    return self._build_error_response(context, f"Planning failed: {e}")
+
+                # PHASE 4c: Code Synthesizer - Génération du code
+                if progress_callback:
+                    await progress_callback("status", {"message": "💻 Synthesizer generating code...", "progress": 60})
+
+                try:
+                    generated = await self.code_synthesizer.generate_code(construction_plan, design_analysis)
+                    code = generated.code
+                    detected_type = "cot_generated"  # Type spécial pour CoT
+                    log.info(f"💻 Synthesizer: Code generated (confidence: {generated.confidence:.2f})")
+                except Exception as e:
+                    log.error(f"Code synthesis failed: {e}")
+                    return self._build_error_response(context, f"Code synthesis failed: {e}")
+
+                context.generated_code = code
+
+            else:
+                # ========== TEMPLATE PATHWAY (Types connus) ==========
+                log.info("⚡ Using template-based generation")
+
+                if progress_callback:
+                    await progress_callback("status", {"message": "💻 Generating code from template...", "progress": 45})
+
+                result = await self._execute_with_retry(
+                    self.generator.generate,
+                    context,
+                    "Code Generation (Template)",
+                    context.analysis
+                )
+
+                if result.status != AgentStatus.SUCCESS:
+                    return self._build_error_response(context, "Code generation failed")
+
+                code, detected_type = result.data
+                context.generated_code = code
 
             # PHASE 5: Syntax Validator - Vérifier la syntaxe
             if progress_callback:

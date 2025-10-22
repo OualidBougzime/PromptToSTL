@@ -18,8 +18,11 @@ requests==2.31.0
 aiohttp==3.9.1
 python-dotenv==1.0.0
 
-# Ollama pour LLM local (remplace HuggingFace)
+# Ollama pour LLM local (Design Expert & Self-Healing)
 ollama==0.3.3
+
+# OpenAI pour Chain-of-Thought (génération universelle)
+openai==1.12.0
 
 # Traitement de mesh avancé (optionnel)
 # Décommenter si vous voulez des fonctionnalités avancées
