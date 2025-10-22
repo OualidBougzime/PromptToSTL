@@ -18,9 +18,9 @@ Ce système transforme la génération CAD basique en un pipeline intelligent or
 9. **SelfHealingAgent** 🩹 - Corrige automatiquement les erreurs (LLM: DeepSeek-Coder 6.7B via Ollama)
 
 ### **Agents Chain-of-Thought (3)** 🆕
-10. **ArchitectAgent** 🏗️ - Analyse et raisonne sur N'IMPORTE QUELLE forme (GPT-4)
-11. **PlannerAgent** 📐 - Crée un plan de construction détaillé (GPT-4)
-12. **CodeSynthesizerAgent** 💻 - Génère du code CadQuery universel (GPT-4)
+10. **ArchitectAgent** 🏗️ - Analyse et raisonne sur N'IMPORTE QUELLE forme (Qwen2.5 14B via Ollama)
+11. **PlannerAgent** 📐 - Crée un plan de construction détaillé (Qwen2.5-Coder 14B via Ollama)
+12. **CodeSynthesizerAgent** 💻 - Génère du code CadQuery universel (DeepSeek-Coder 33B via Ollama)
 
 ---
 
@@ -30,7 +30,7 @@ Ce système transforme la génération CAD basique en un pipeline intelligent or
 USER PROMPT → Analyst Agent
     ↓
     ├─ Type CONNU (splint, stent...) → Template (2s, $0) ⚡
-    └─ Type INCONNU (gear, cube, ANY...) → Chain-of-Thought (12s, $0.01) 🧠
+    └─ Type INCONNU (gear, cube, ANY...) → Chain-of-Thought (20s, $0) 🧠
 ```
 
 **Documentation complète**: Voir [COT_SYSTEM.md](COT_SYSTEM.md)

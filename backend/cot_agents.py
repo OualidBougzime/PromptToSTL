@@ -45,63 +45,56 @@ class GeneratedCode:
     confidence: float
 
 
-# ========== OPENAI CLIENT ==========
+# ========== OLLAMA CLIENT FOR COT ==========
 
-class OpenAIClient:
-    """Client pour interagir avec OpenAI GPT-4"""
+class OllamaCoTClient:
+    """Client Ollama pour Chain-of-Thought (génération universelle)"""
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4"):
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
+    def __init__(self, model: str, base_url: Optional[str] = None):
         self.model = model
-        self.use_fallback = not self.api_key
+        self.base_url = base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        self.use_fallback = False
 
-        if self.use_fallback:
-            log.warning("⚠️ No OpenAI API key, Chain-of-Thought will use fallback mode")
-        else:
-            log.info(f"✅ OpenAI Client initialized: {model}")
+        try:
+            import ollama
+            self.client = ollama.AsyncClient(host=self.base_url)
+            log.info(f"✅ Ollama CoT Client initialized: {model} @ {self.base_url}")
+        except ImportError:
+            log.error("⚠️ Ollama package not installed, using fallback mode")
+            self.use_fallback = True
+        except Exception as e:
+            log.warning(f"⚠️ Ollama connection failed: {e}, using fallback mode")
+            self.use_fallback = True
 
     async def generate(self, messages: List[Dict[str, str]], temperature: float = 0.7, max_tokens: int = 2000) -> str:
-        """Génère une réponse via OpenAI API"""
+        """Génère une réponse via Ollama (format chat compatible OpenAI)"""
 
         if self.use_fallback:
             return await self._fallback_generate(messages)
 
         try:
-            import openai
-            import aiohttp
+            import ollama
 
-            openai.api_key = self.api_key
-
-            # Utiliser l'API OpenAI async
-            async with aiohttp.ClientSession() as session:
-                headers = {
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json"
-                }
-
-                payload = {
-                    "model": self.model,
-                    "messages": messages,
+            # Ollama supporte le format messages (chat)
+            response = await self.client.chat(
+                model=self.model,
+                messages=messages,
+                options={
+                    "num_predict": max_tokens,
                     "temperature": temperature,
-                    "max_tokens": max_tokens
+                    "top_p": 0.9,
                 }
+            )
 
-                async with session.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers=headers,
-                    json=payload,
-                    timeout=60
-                ) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        return result["choices"][0]["message"]["content"]
-                    else:
-                        error_text = await response.text()
-                        log.error(f"OpenAI API error {response.status}: {error_text}")
-                        return await self._fallback_generate(messages)
+            # Ollama retourne un dict avec 'message' -> 'content'
+            if isinstance(response, dict) and "message" in response:
+                return response["message"]["content"].strip()
+
+            return str(response).strip()
 
         except Exception as e:
-            log.error(f"OpenAI API call failed: {e}")
+            log.error(f"Ollama CoT API call failed: {e}")
+            log.warning("Falling back to heuristic mode")
             return await self._fallback_generate(messages)
 
     async def _fallback_generate(self, messages: List[Dict[str, str]]) -> str:
@@ -136,8 +129,8 @@ class ArchitectAgent:
     """
 
     def __init__(self):
-        model = os.getenv("COT_ARCHITECT_MODEL", "gpt-4")
-        self.client = OpenAIClient(model=model)
+        model = os.getenv("COT_ARCHITECT_MODEL", "qwen2.5:14b")
+        self.client = OllamaCoTClient(model=model)
         log.info("🏗️ ArchitectAgent (Chain-of-Thought) initialized")
 
     async def analyze_design(self, prompt: str) -> DesignAnalysis:
@@ -216,8 +209,8 @@ class PlannerAgent:
     """
 
     def __init__(self):
-        model = os.getenv("COT_PLANNER_MODEL", "gpt-4")
-        self.client = OpenAIClient(model=model)
+        model = os.getenv("COT_PLANNER_MODEL", "qwen2.5-coder:14b")
+        self.client = OllamaCoTClient(model=model)
         log.info("📐 PlannerAgent initialized")
 
     async def create_plan(self, analysis: DesignAnalysis, prompt: str) -> ConstructionPlan:
@@ -315,8 +308,8 @@ class CodeSynthesizerAgent:
     """
 
     def __init__(self):
-        model = os.getenv("COT_SYNTHESIZER_MODEL", "gpt-4")
-        self.client = OpenAIClient(model=model)
+        model = os.getenv("COT_SYNTHESIZER_MODEL", "deepseek-coder:33b")
+        self.client = OllamaCoTClient(model=model)
         log.info("💻 CodeSynthesizerAgent initialized")
 
     async def generate_code(self, plan: ConstructionPlan, analysis: DesignAnalysis) -> GeneratedCode:
