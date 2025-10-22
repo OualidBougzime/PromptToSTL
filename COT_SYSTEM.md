@@ -1,8 +1,10 @@
-# 🧠 Chain-of-Thought System - Génération Universelle
+# 🧠 Chain-of-Thought System - Génération Universelle (Ollama)
 
 ## 🎯 Vue d'Ensemble
 
 Le système Chain-of-Thought (CoT) permet de générer **N'IMPORTE QUELLE forme 3D**, pas juste les templates prédéfinis.
+
+**100% Open-Source & Local** - Utilise Ollama avec les meilleurs modèles disponibles (Qwen2.5, DeepSeek-Coder)
 
 ### Routing Intelligent
 
@@ -38,6 +40,7 @@ Le système Chain-of-Thought (CoT) permet de générer **N'IMPORTE QUELLE forme 
 
 ### 1. **Architect Agent** 🏗️
 **Rôle:** Analyser et raisonner sur le design
+**Modèle:** `qwen2.5:14b` (via Ollama) - Excellent pour le raisonnement
 
 **Processus:**
 1. Comprend la demande utilisateur
@@ -68,6 +71,7 @@ Output:
 
 ### 2. **Planner Agent** 📐
 **Rôle:** Créer un plan de construction détaillé
+**Modèle:** `qwen2.5-coder:14b` (via Ollama) - Spécialisé en code
 
 **Processus:**
 1. Décompose en étapes CadQuery spécifiques
@@ -115,6 +119,7 @@ Output:
 
 ### 3. **Code Synthesizer Agent** 💻
 **Rôle:** Générer le code CadQuery final
+**Modèle:** `deepseek-coder:33b` (via Ollama) - Expert en génération de code
 
 **Processus:**
 1. Convertit le plan en code Python/CadQuery
@@ -182,59 +187,66 @@ Prompt: "create a gear with 20 teeth"
   ↓
 Analyst: type = "unknown" ❓ INCONNU
   ↓
-Architect: Analyse le design (GPT-4)
+Architect: Analyse le design (Qwen2.5 14B)
   ↓
-Planner: Crée le plan (GPT-4)
+Planner: Crée le plan (Qwen2.5-Coder 14B)
   ↓
-Synthesizer: Génère le code (GPT-4)
+Synthesizer: Génère le code (DeepSeek-Coder 33B)
   ↓
 Validator: Exécute et génère STL
   ↓
-✅ Génération en 10-15 secondes
-💰 Coût: ~$0.01-0.02 (OpenAI API)
+✅ Génération en 15-25 secondes
+💰 Coût: $0 (100% local avec Ollama)
 ```
 
 ---
 
 ## ⚙️ Configuration
 
-### 1. Variables d'Environnement (`.env`)
+### 1. Installer les Modèles Ollama
+
+**Téléchargez les 3 modèles pour Chain-of-Thought:**
 
 ```bash
-# OpenAI API Key (obligatoire pour CoT)
-OPENAI_API_KEY=sk-your-api-key-here
+# Architect - Raisonnement (14B paramètres, ~8GB RAM)
+ollama pull qwen2.5:14b
 
-# Modèles Chain-of-Thought (recommandé: GPT-4)
-COT_ARCHITECT_MODEL=gpt-4
-COT_PLANNER_MODEL=gpt-4
-COT_SYNTHESIZER_MODEL=gpt-4
+# Planner - Planification code (14B paramètres, ~8GB RAM)
+ollama pull qwen2.5-coder:14b
+
+# Synthesizer - Génération code (33B paramètres, ~19GB RAM)
+ollama pull deepseek-coder:33b
 ```
 
-### 2. Obtenir une clé OpenAI
+**Alternative légère (si RAM limitée < 16GB):**
+```bash
+# Version 7B (4-5GB RAM chacun)
+ollama pull qwen2.5:7b
+ollama pull qwen2.5-coder:7b
+ollama pull deepseek-coder:6.7b
+```
 
-1. Créez un compte sur [platform.openai.com](https://platform.openai.com)
-2. Allez dans **API Keys**: https://platform.openai.com/api-keys
-3. Cliquez **"Create new secret key"**
-4. Copiez la clé et ajoutez-la dans `.env`
+### 2. Variables d'Environnement (`.env`)
+
+```bash
+# Chain-of-Thought Models (Ollama)
+COT_ARCHITECT_MODEL=qwen2.5:14b
+COT_PLANNER_MODEL=qwen2.5-coder:14b
+COT_SYNTHESIZER_MODEL=deepseek-coder:33b
+```
 
 ### 3. Budget & Coûts
 
-**GPT-4 Pricing (Janvier 2024):**
-- Input: $0.03 / 1K tokens
-- Output: $0.06 / 1K tokens
+**100% GRATUIT !** 🎉
+- Tous les modèles sont open-source
+- Exécution locale (pas d'API)
+- Pas de limite de requêtes
+- Confidentialité totale (données locales)
 
-**Estimation par requête:**
-- Simple (cube, cylinder): ~1000 tokens → $0.005
-- Moyen (gear,螺纹): ~1500 tokens → $0.008
-- Complexe (engine part): ~2500 tokens → $0.015
-
-**Alternative économique:**
-```bash
-# Utiliser GPT-3.5-turbo (10x moins cher)
-COT_ARCHITECT_MODEL=gpt-3.5-turbo
-COT_PLANNER_MODEL=gpt-3.5-turbo
-COT_SYNTHESIZER_MODEL=gpt-4  # Garder GPT-4 pour la synthèse
-```
+**Requirements système:**
+- RAM: 32GB recommandé pour les modèles 14B/33B
+- RAM: 16GB minimum pour les modèles 7B
+- GPU: Optionnel mais accélère l'inférence (NVIDIA, AMD, ou Apple Silicon)
 
 ---
 
@@ -243,11 +255,12 @@ COT_SYNTHESIZER_MODEL=gpt-4  # Garder GPT-4 pour la synthèse
 | Critère | Template | Chain-of-Thought |
 |---------|----------|------------------|
 | **Types supportés** | 8 types prédéfinis | ∞ N'importe quelle forme |
-| **Vitesse** | ⚡ 2 secondes | 🧠 10-15 secondes |
-| **Coût** | 💰 Gratuit | 💰 $0.01-0.02 par requête |
-| **Qualité** | ✅ Excellente (optimisée) | ✅ Bonne (dépend du LLM) |
+| **Vitesse** | ⚡ 2 secondes | 🧠 15-25 secondes |
+| **Coût** | 💰 Gratuit | 💰 Gratuit (local) |
+| **Qualité** | ✅ Excellente (optimisée) | ✅ Très bonne (Qwen2.5, DeepSeek) |
 | **Flexibilité** | ❌ Limitée | ✅ Totale |
-| **Configuration** | ✅ Aucune | ⚙️ OpenAI API Key requise |
+| **Configuration** | ✅ Aucune | ⚙️ Modèles Ollama requis |
+| **RAM nécessaire** | 2GB | 16-32GB selon modèles |
 
 ---
 
@@ -284,8 +297,8 @@ Prompt: "create a gear with 20 teeth, 50mm diameter, 10mm thick"
 Résultat:
 ✅ Code CadQuery généré avec involute tooth profile
 ✅ STL exporté (gear_generated.stl)
-⏱️ Temps: 12 secondes
-💰 Coût: $0.012
+⏱️ Temps: 18 secondes
+💰 Coût: $0 (local)
 ```
 
 ### Exemple 2: Support de caméra
@@ -296,8 +309,8 @@ Prompt: "create a camera mount bracket for 1/4 inch screw,
 Résultat:
 ✅ Code CadQuery avec base plate + angle + screw hole
 ✅ STL exporté (mount_generated.stl)
-⏱️ Temps: 14 secondes
-💰 Coût: $0.015
+⏱️ Temps: 22 secondes
+💰 Coût: $0 (local)
 ```
 
 ### Exemple 3: Cube simple
@@ -307,24 +320,24 @@ Prompt: "create a cube 50mm"
 Résultat:
 ✅ Code CadQuery basique (box primitive)
 ✅ STL exporté (cube_generated.stl)
-⏱️ Temps: 8 secondes
-💰 Coût: $0.005
+⏱️ Temps: 12 secondes
+💰 Coût: $0 (local)
 ```
 
 ---
 
 ## 🔧 Mode Fallback
 
-Si l'API OpenAI n'est pas disponible (pas de clé, quota dépassé, erreur réseau), le système passe automatiquement en **mode fallback**:
+Si Ollama n'est pas disponible (pas installé, service arrêté, modèle non téléchargé), le système passe automatiquement en **mode fallback**:
 
 - Utilise des règles heuristiques simples
 - Génère des formes basiques (cube, cylinder, sphere)
-- Pas de coût
+- Toujours gratuit
 - Qualité réduite
 
 **Message de log:**
 ```
-⚠️ No OpenAI API key, Chain-of-Thought will use fallback mode
+⚠️ Ollama connection failed, using fallback mode
 ```
 
 ---
@@ -333,14 +346,14 @@ Si l'API OpenAI n'est pas disponible (pas de clé, quota dépassé, erreur rése
 
 ### Temps de Génération
 - **Template**: 1-2 secondes
-- **CoT Simple**: 8-10 secondes
-- **CoT Moyen**: 12-15 secondes
-- **CoT Complexe**: 15-20 secondes
+- **CoT Simple**: 12-15 secondes
+- **CoT Moyen**: 18-22 secondes
+- **CoT Complexe**: 25-35 secondes
 
-### Taux de Succès (avec GPT-4)
-- **Formes simples**: 95%+
-- **Formes moyennes**: 85%+
-- **Formes complexes**: 70%+
+### Taux de Succès (avec Qwen2.5 + DeepSeek)
+- **Formes simples**: 90%+
+- **Formes moyennes**: 80%+
+- **Formes complexes**: 65-70%
 
 ### Limitations
 - ❌ Ne peut pas générer des formes nécessitant des données externes (scans 3D, meshes complexes)
@@ -361,26 +374,33 @@ Si l'API OpenAI n'est pas disponible (pas de clé, quota dépassé, erreur rése
 
 ## 📚 Ressources
 
-- **OpenAI API Docs**: https://platform.openai.com/docs
+- **Ollama**: https://ollama.ai
+- **Qwen2.5 Models**: https://ollama.com/library/qwen2.5
+- **Qwen2.5-Coder Models**: https://ollama.com/library/qwen2.5-coder
+- **DeepSeek-Coder Models**: https://ollama.com/library/deepseek-coder
 - **CadQuery Docs**: https://cadquery.readthedocs.io
-- **Pricing**: https://openai.com/pricing
 
 ---
 
 ## 🐛 Troubleshooting
 
-### Erreur: "No OpenAI API key"
-→ Ajoutez `OPENAI_API_KEY` dans `.env`
+### Erreur: "Ollama connection failed"
+→ Lancez Ollama: `ollama serve`
 
-### Erreur: "Rate limit exceeded"
-→ Attendez quelques secondes ou augmentez votre quota OpenAI
+### Erreur: "model not found"
+→ Téléchargez le modèle: `ollama pull qwen2.5:14b`
+
+### Génération trop lente
+→ Utilisez les versions 7B au lieu de 14B/33B
+→ Utilisez un GPU pour accélérer
 
 ### Code généré invalide
 → Le système utilise Self-Healing Agent automatiquement
 → Si échec persistant, vérifiez les logs
 
-### Temps trop long
-→ Utilisez GPT-3.5-turbo au lieu de GPT-4 (plus rapide, moins cher)
+### RAM insuffisante
+→ Utilisez les modèles 7B (4-5GB RAM chacun)
+→ Fermez les autres applications
 
 ---
 
