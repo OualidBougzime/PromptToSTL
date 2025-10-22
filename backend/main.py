@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
@@ -13,6 +14,9 @@ from agents import AnalystAgent, GeneratorAgent, ValidatorAgent
 from multi_agent_system import OrchestratorAgent
 
 # ========== CONFIGURATION ==========
+# Charger les variables d'environnement depuis .env
+load_dotenv()
+
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("cadamx")
 
