@@ -2,20 +2,38 @@
 
 ## 📋 Vue d'Ensemble
 
-Ce système transforme la génération CAD basique en un pipeline intelligent orchestré par **9 agents spécialisés** :
+Ce système transforme la génération CAD basique en un pipeline intelligent orchestré par **12 agents spécialisés** avec **routing hybride** :
 
-### **Agents Existants (3)**
+### **Agents Base (3)**
 1. **AnalystAgent** - Détecte le type d'application et extrait les paramètres
 2. **GeneratorAgent** - Génère le code Python/CadQuery à partir des templates
 3. **ValidatorAgent** - Valide et exécute le code généré
 
-### **Nouveaux Agents (6)**
-4. **OrchestratorAgent** 🎯 - Coordonne le pipeline complet avec retry intelligent
+### **Agents Multi-Agent (6)**
+4. **OrchestratorAgent** 🎯 - Coordonne le pipeline complet avec retry intelligent + **ROUTING**
 5. **DesignExpertAgent** 🎨 - Valide les règles métier par type CAD (LLM: Qwen2.5-Coder 7B via Ollama)
 6. **ConstraintValidatorAgent** ⚖️ - Vérifie les contraintes de fabrication
 7. **SyntaxValidatorAgent** ✅ - Vérifie la syntaxe du code avant exécution
 8. **ErrorHandlerAgent** 🚨 - Gère les erreurs de façon intelligente
 9. **SelfHealingAgent** 🩹 - Corrige automatiquement les erreurs (LLM: DeepSeek-Coder 6.7B via Ollama)
+
+### **Agents Chain-of-Thought (3)** 🆕
+10. **ArchitectAgent** 🏗️ - Analyse et raisonne sur N'IMPORTE QUELLE forme (GPT-4)
+11. **PlannerAgent** 📐 - Crée un plan de construction détaillé (GPT-4)
+12. **CodeSynthesizerAgent** 💻 - Génère du code CadQuery universel (GPT-4)
+
+---
+
+## 🔀 Routing Hybride Intelligent
+
+```
+USER PROMPT → Analyst Agent
+    ↓
+    ├─ Type CONNU (splint, stent...) → Template (2s, $0) ⚡
+    └─ Type INCONNU (gear, cube, ANY...) → Chain-of-Thought (12s, $0.01) 🧠
+```
+
+**Documentation complète**: Voir [COT_SYSTEM.md](COT_SYSTEM.md)
 
 ---
 
