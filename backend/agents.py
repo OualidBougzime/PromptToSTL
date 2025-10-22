@@ -24,17 +24,17 @@ class AnalystAgent:
     async def analyze(self, prompt: str) -> Dict[str, Any]:
         """Analyse et détecte le type d'application + paramètres"""
         p = prompt.lower()
-        
+
         app_type = self._detect_application_type(p)
         log.info(f"✅ Detected application type: {app_type.upper()}")
-        
+
         if app_type == 'splint':
             return self._analyze_splint(prompt)
         elif app_type == 'stent':
             return self._analyze_stent(prompt)
         elif app_type == 'facade_pyramid':
             return self._analyze_facade_pyramid(prompt)
-        elif app_type == 'honeycomb':  # 🔥 NOUVEAU
+        elif app_type == 'honeycomb':
             return self._analyze_honeycomb(prompt)
         elif app_type == 'louvre_wall':
             return self._analyze_louvre_wall(prompt)
@@ -46,7 +46,15 @@ class AnalystAgent:
             return self._analyze_gripper(prompt)
         elif app_type == 'heatsink':
             return self._analyze_heatsink(prompt)
+        elif app_type == 'unknown':
+            # Type inconnu → va utiliser Chain-of-Thought
+            return {
+                "type": "unknown",
+                "parameters": {},
+                "raw_prompt": prompt
+            }
         else:
+            # Fallback (ne devrait jamais arriver)
             return self._analyze_splint(prompt)
 
     def _analyze_honeycomb(self, prompt: str) -> Dict[str, Any]:
@@ -126,11 +134,11 @@ class AnalystAgent:
             return 'lattice'
         
         detected = max(scores, key=scores.get)
-        
+
         if scores[detected] == 0:
-            log.warning("⚠️ No clear application type detected, defaulting to splint")
-            return 'splint'
-        
+            log.info("🧠 No template keywords found → routing to Chain-of-Thought")
+            return 'unknown'
+
         return detected
 
     def _analyze_heatsink(self, prompt: str) -> Dict[str, Any]:
