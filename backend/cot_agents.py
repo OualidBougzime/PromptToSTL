@@ -376,6 +376,33 @@ Generate the complete working CadQuery code.
             elif "```" in response:
                 code = response.split("```")[1].split("```")[0].strip()
 
+            # Nettoyer les caractères Unicode problématiques (fullwidth → ASCII)
+            unicode_replacements = {
+                '｜': '|',  # Fullwidth vertical line
+                '（': '(',  # Fullwidth left parenthesis
+                '）': ')',  # Fullwidth right parenthesis
+                '［': '[',  # Fullwidth left bracket
+                '］': ']',  # Fullwidth right bracket
+                '｛': '{',  # Fullwidth left brace
+                '｝': '}',  # Fullwidth right brace
+                '，': ',',  # Fullwidth comma
+                '．': '.',  # Fullwidth period
+                '：': ':',  # Fullwidth colon
+                '；': ';',  # Fullwidth semicolon
+                '＝': '=',  # Fullwidth equals
+                '＋': '+',  # Fullwidth plus
+                '－': '-',  # Fullwidth minus
+                '＊': '*',  # Fullwidth asterisk
+                '／': '/',  # Fullwidth slash
+                '＜': '<',  # Fullwidth less than
+                '＞': '>',  # Fullwidth greater than
+                '＂': '"',  # Fullwidth quotation mark
+                '＇': "'",  # Fullwidth apostrophe
+            }
+
+            for unicode_char, ascii_char in unicode_replacements.items():
+                code = code.replace(unicode_char, ascii_char)
+
             # Vérifier que le code contient les imports nécessaires
             if "import cadquery" not in code:
                 code = "import cadquery as cq\n\n" + code
