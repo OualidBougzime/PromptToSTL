@@ -195,7 +195,7 @@ BAD:  "parameters": {"angle": 45 * 30}
                     # Sécurité: seulement autoriser nombres et opérateurs de base
                     if re.match(r'^[\d\s\+\-\*\/\(\)\.]+$', expr):
                         result = eval(expr)
-                        return str(result)
+                        return f": {result}"  # IMPORTANT: Remettre le ':' !
                 except:
                     pass
                 return match.group(0)
@@ -351,7 +351,7 @@ Original prompt: {prompt}
                     expr = match.group(1)
                     if re.match(r'^[\d\s\+\-\*\/\(\)\.]+$', expr):
                         result = eval(expr)
-                        return str(result)
+                        return f": {result}"  # IMPORTANT: Remettre le ':' !
                 except:
                     pass
                 return match.group(0)
