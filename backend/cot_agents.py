@@ -8,6 +8,7 @@ pour tout ce qu'on lui demande (engrenages, supports, boîtiers, etc.)
 
 import os
 import json
+import re
 import logging
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
@@ -154,6 +155,17 @@ Output your analysis in this JSON format:
   "complexity": "simple|medium|complex",
   "reasoning": "Your step-by-step reasoning"
 }
+
+CRITICAL RULES FOR VALID JSON:
+- ALL parameter values MUST be actual numbers, NOT the word "value"
+- Calculate ALL math expressions (e.g., 45*30=1350) and use the result
+- Use concrete numeric values, estimate reasonable defaults
+- NO variable names, NO placeholders, NO expressions
+- ONLY use: strings, numbers, arrays, objects, true, false, null
+
+GOOD: "parameters": {"radius": 25, "height": 50}
+BAD:  "parameters": {"radius": value, "height": value}
+BAD:  "parameters": {"angle": 45 * 30}
 """
 
         messages = [
@@ -171,6 +183,24 @@ Output your analysis in this JSON format:
                 json_str = response.split("```json")[1].split("```")[0].strip()
             elif "```" in response:
                 json_str = response.split("```")[1].split("```")[0].strip()
+
+            # Nettoyer les patterns JSON invalides courants
+            # Pattern 1: Remplacer ": value" par ": 50" (valeur par défaut)
+            json_str = re.sub(r':\s*value\b', ': 50', json_str, flags=re.IGNORECASE)
+
+            # Pattern 2: Évaluer les expressions mathématiques simples (e.g., "45 * 30" → 1350)
+            def eval_math(match):
+                try:
+                    expr = match.group(1)
+                    # Sécurité: seulement autoriser nombres et opérateurs de base
+                    if re.match(r'^[\d\s\+\-\*\/\(\)\.]+$', expr):
+                        result = eval(expr)
+                        return str(result)
+                except:
+                    pass
+                return match.group(0)
+
+            json_str = re.sub(r':\s*([0-9\s\+\-\*\/\(\)\.]+)(?=\s*[,}\]])', eval_math, json_str)
 
             try:
                 data = json.loads(json_str)
@@ -283,6 +313,12 @@ Output JSON format:
   "constraints": ["All dimensions positive", "Feature size > 1mm"],
   "estimated_complexity": 3
 }
+
+CRITICAL RULES FOR VALID JSON:
+- ALL values MUST be actual numbers, NOT "value" or variables
+- Calculate ALL math expressions (e.g., 45*30=1350)
+- Use concrete numeric values
+- NO expressions in JSON, NO placeholders
 """
 
         messages = [
@@ -305,6 +341,22 @@ Original prompt: {prompt}
                 json_str = response.split("```json")[1].split("```")[0].strip()
             elif "```" in response:
                 json_str = response.split("```")[1].split("```")[0].strip()
+
+            # Nettoyer les patterns JSON invalides
+            json_str = re.sub(r':\s*value\b', ': 50', json_str, flags=re.IGNORECASE)
+
+            # Évaluer les expressions mathématiques
+            def eval_math(match):
+                try:
+                    expr = match.group(1)
+                    if re.match(r'^[\d\s\+\-\*\/\(\)\.]+$', expr):
+                        result = eval(expr)
+                        return str(result)
+                except:
+                    pass
+                return match.group(0)
+
+            json_str = re.sub(r':\s*([0-9\s\+\-\*\/\(\)\.]+)(?=\s*[,}\]])', eval_math, json_str)
 
             try:
                 data = json.loads(json_str)
