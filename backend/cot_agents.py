@@ -175,7 +175,9 @@ Output your analysis in this JSON format:
             try:
                 data = json.loads(json_str)
             except json.JSONDecodeError as je:
-                log.warning(f"JSON parsing failed, using fallback: {je}")
+                log.error(f"❌ Architect JSON parsing failed: {je}")
+                log.error(f"📝 LLM full response (first 800 chars):\n{response[:800]}")
+                log.error(f"📝 Extracted JSON string (first 500 chars):\n{json_str[:500]}")
                 # Si le JSON est invalide, utiliser le fallback
                 raise je
 
@@ -307,7 +309,9 @@ Original prompt: {prompt}
             try:
                 data = json.loads(json_str)
             except json.JSONDecodeError as je:
-                log.warning(f"JSON parsing failed, using fallback: {je}")
+                log.error(f"❌ Planner JSON parsing failed: {je}")
+                log.error(f"📝 LLM full response (first 800 chars):\n{response[:800]}")
+                log.error(f"📝 Extracted JSON string (first 500 chars):\n{json_str[:500]}")
                 raise je
 
             return ConstructionPlan(
