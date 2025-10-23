@@ -384,6 +384,20 @@ Generate the complete working CadQuery code.
             if "result" not in code:
                 code += "\n\n# Final result\nresult"
 
+            # Ajouter automatiquement l'export STL
+            if "cq.exporters.export" not in code and ".exportStl" not in code:
+                export_code = """
+
+# Export to STL
+from pathlib import Path
+output_dir = Path(__file__).parent / "output"
+output_dir.mkdir(exist_ok=True)
+output_path = output_dir / "generated_cot_generated.stl"
+cq.exporters.export(result, str(output_path))
+print(f"✅ STL exported to: {output_path}")
+"""
+                code += export_code
+
             return GeneratedCode(
                 code=code,
                 language="python",
@@ -393,11 +407,19 @@ Generate the complete working CadQuery code.
 
         except Exception as e:
             log.error(f"Code synthesis failed: {e}")
-            # Fallback: code simple
+            # Fallback: code simple avec export
             fallback_code = """import cadquery as cq
+from pathlib import Path
 
 # Fallback: Create simple box
 result = cq.Workplane("XY").box(50, 50, 50)
+
+# Export to STL
+output_dir = Path(__file__).parent / "output"
+output_dir.mkdir(exist_ok=True)
+output_path = output_dir / "generated_cot_generated.stl"
+cq.exporters.export(result, str(output_path))
+print(f"✅ STL exported to: {output_path}")
 """
             return GeneratedCode(
                 code=fallback_code,
