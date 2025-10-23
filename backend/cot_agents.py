@@ -175,7 +175,9 @@ Output your analysis in this JSON format:
             try:
                 data = json.loads(json_str)
             except json.JSONDecodeError as je:
-                log.warning(f"JSON parsing failed, using fallback: {je}")
+                log.error(f"❌ Architect JSON parsing failed: {je}")
+                log.error(f"📝 LLM full response (first 800 chars):\n{response[:800]}")
+                log.error(f"📝 Extracted JSON string (first 500 chars):\n{json_str[:500]}")
                 # Si le JSON est invalide, utiliser le fallback
                 raise je
 
@@ -190,14 +192,45 @@ Output your analysis in this JSON format:
 
         except Exception as e:
             log.warning(f"Architect using fallback analysis: {e}")
-            # Fallback simple
+
+            # Fallback intelligent - détecte les formes basiques dans le prompt
+            prompt_lower = prompt.lower()
+
+            # Détection de forme
+            if "cylinder" in prompt_lower or "cylindre" in prompt_lower:
+                primitives = ["cylinder"]
+                operations = ["create_workplane", "create_cylinder"]
+                params = {"radius": 25, "height": 50}
+                desc = "Simple cylinder"
+            elif "sphere" in prompt_lower or "ball" in prompt_lower:
+                primitives = ["sphere"]
+                operations = ["create_workplane", "create_sphere"]
+                params = {"radius": 25}
+                desc = "Simple sphere"
+            elif "cone" in prompt_lower:
+                primitives = ["cone"]
+                operations = ["create_workplane", "create_cone"]
+                params = {"radius1": 30, "radius2": 0, "height": 50}
+                desc = "Simple cone"
+            elif "torus" in prompt_lower:
+                primitives = ["torus"]
+                operations = ["create_workplane", "create_torus"]
+                params = {"major_radius": 30, "minor_radius": 10}
+                desc = "Simple torus"
+            else:
+                # Par défaut: cube/box
+                primitives = ["box"]
+                operations = ["create_workplane", "create_box"]
+                params = {"width": 50, "height": 50, "depth": 50}
+                desc = "Simple box"
+
             return DesignAnalysis(
-                description=prompt,
-                primitives_needed=["box"],
-                operations_sequence=["create_workplane", "create_box"],
-                parameters={"width": 50, "height": 50, "depth": 50},
+                description=desc,
+                primitives_needed=primitives,
+                operations_sequence=operations,
+                parameters=params,
                 complexity="simple",
-                reasoning="Fallback analysis - creating basic box"
+                reasoning=f"Fallback analysis - detected '{primitives[0]}' in prompt"
             )
 
 
@@ -276,7 +309,9 @@ Original prompt: {prompt}
             try:
                 data = json.loads(json_str)
             except json.JSONDecodeError as je:
-                log.warning(f"JSON parsing failed, using fallback: {je}")
+                log.error(f"❌ Planner JSON parsing failed: {je}")
+                log.error(f"📝 LLM full response (first 800 chars):\n{response[:800]}")
+                log.error(f"📝 Extracted JSON string (first 500 chars):\n{json_str[:500]}")
                 raise je
 
             return ConstructionPlan(
@@ -288,15 +323,47 @@ Original prompt: {prompt}
 
         except Exception as e:
             log.warning(f"Planner using fallback plan: {e}")
-            # Fallback simple
-            return ConstructionPlan(
-                steps=[
+
+            # Fallback intelligent basé sur l'analyse
+            if analysis.primitives_needed and len(analysis.primitives_needed) > 0:
+                primitive = analysis.primitives_needed[0]
+                params = analysis.parameters
+            else:
+                primitive = "box"
+                params = {"length": 50, "width": 50, "height": 50}
+
+            # Créer le plan approprié
+            if primitive == "cylinder":
+                steps = [
+                    {"operation": "Workplane", "parameters": {"plane": "XY"}, "description": "Create base workplane"},
+                    {"operation": "circle", "parameters": {"radius": params.get("radius", 25)}, "description": "Create circle"},
+                    {"operation": "extrude", "parameters": {"distance": params.get("height", 50)}, "description": "Extrude to height"}
+                ]
+            elif primitive == "sphere":
+                steps = [
+                    {"operation": "Workplane", "parameters": {"plane": "XY"}, "description": "Create base workplane"},
+                    {"operation": "sphere", "parameters": {"radius": params.get("radius", 25)}, "description": "Create sphere"}
+                ]
+            elif primitive == "cone":
+                steps = [
+                    {"operation": "Workplane", "parameters": {"plane": "XY"}, "description": "Create base workplane"},
+                    {"operation": "circle", "parameters": {"radius": params.get("radius1", 30)}, "description": "Create base circle"},
+                    {"operation": "workplane", "parameters": {"offset": params.get("height", 50)}, "description": "Create top workplane"},
+                    {"operation": "circle", "parameters": {"radius": params.get("radius2", 0)}, "description": "Create top circle"},
+                    {"operation": "loft", "parameters": {}, "description": "Loft between circles"}
+                ]
+            else:
+                # Box par défaut
+                steps = [
                     {"operation": "Workplane", "parameters": {"plane": "XY"}, "description": "Create base"},
-                    {"operation": "box", "parameters": {"length": 50, "width": 50, "height": 50}, "description": "Create box"}
-                ],
+                    {"operation": "box", "parameters": {"length": params.get("width", 50), "width": params.get("height", 50), "height": params.get("depth", 50)}, "description": f"Create {primitive}"}
+                ]
+
+            return ConstructionPlan(
+                steps=steps,
                 variables={},
                 constraints=[],
-                estimated_complexity=1
+                estimated_complexity=len(steps)
             )
 
 
@@ -433,26 +500,55 @@ print(f"✅ STL exported to: {output_path}")
             )
 
         except Exception as e:
-            log.error(f"Code synthesis failed: {e}")
-            # Fallback: code simple avec export
-            fallback_code = """import cadquery as cq
+            log.warning(f"Code synthesis using fallback: {e}")
+
+            # Fallback intelligent basé sur l'analyse
+            if analysis.primitives_needed and len(analysis.primitives_needed) > 0:
+                primitive = analysis.primitives_needed[0]
+                params = analysis.parameters
+            else:
+                primitive = "box"
+                params = {"width": 50, "height": 50, "depth": 50}
+
+            # Générer le code approprié
+            if primitive == "cylinder":
+                shape_code = f'result = cq.Workplane("XY").circle({params.get("radius", 25)}).extrude({params.get("height", 50)})'
+            elif primitive == "sphere":
+                shape_code = f'result = cq.Workplane("XY").sphere({params.get("radius", 25)})'
+            elif primitive == "cone":
+                r1 = params.get("radius1", 30)
+                r2 = params.get("radius2", 0)
+                h = params.get("height", 50)
+                shape_code = f'''result = (cq.Workplane("XY")
+    .circle({r1})
+    .workplane(offset={h})
+    .circle({r2})
+    .loft())'''
+            else:
+                # Box par défaut
+                w = params.get("width", 50)
+                h = params.get("height", 50)
+                d = params.get("depth", 50)
+                shape_code = f'result = cq.Workplane("XY").box({w}, {h}, {d})'
+
+            fallback_code = f"""import cadquery as cq
 from pathlib import Path
 
-# Fallback: Create simple box
-result = cq.Workplane("XY").box(50, 50, 50)
+# Fallback: Create {primitive}
+{shape_code}
 
 # Export to STL
 output_dir = Path(__file__).parent / "output"
 output_dir.mkdir(exist_ok=True)
 output_path = output_dir / "generated_cot_generated.stl"
 cq.exporters.export(result, str(output_path))
-print(f"✅ STL exported to: {output_path}")
+print(f"✅ STL exported to: {{output_path}}")
 """
             return GeneratedCode(
                 code=fallback_code,
                 language="python",
-                primitives_used=["box"],
-                confidence=0.3
+                primitives_used=[primitive],
+                confidence=0.5
             )
 
 
