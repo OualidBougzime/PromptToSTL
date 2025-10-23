@@ -593,7 +593,12 @@ class ValidatorAgent:
         import numpy as np
         from pathlib import Path
         import time
-        
+
+        # Fonction no-op pour show_object (utilisée par CQ-Editor)
+        def show_object(obj, name=None, options=None):
+            """Dummy function - show_object is only for CQ-Editor"""
+            pass
+
         ns = {
             "__builtins__": self._safe_builtins(),
             "math": math,
@@ -601,6 +606,7 @@ class ValidatorAgent:
             "numpy": np,
             "struct": __import__('struct'),
             "Path": Path,
+            "show_object": show_object,
             "__file__": str(Path(__file__).parent / "temp_exec.py"),
         }
 

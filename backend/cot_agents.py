@@ -172,7 +172,12 @@ Output your analysis in this JSON format:
             elif "```" in response:
                 json_str = response.split("```")[1].split("```")[0].strip()
 
-            data = json.loads(json_str)
+            try:
+                data = json.loads(json_str)
+            except json.JSONDecodeError as je:
+                log.warning(f"JSON parsing failed, using fallback: {je}")
+                # Si le JSON est invalide, utiliser le fallback
+                raise je
 
             return DesignAnalysis(
                 description=data.get("description", "Unknown shape"),
@@ -184,7 +189,7 @@ Output your analysis in this JSON format:
             )
 
         except Exception as e:
-            log.error(f"Architect analysis failed: {e}")
+            log.warning(f"Architect using fallback analysis: {e}")
             # Fallback simple
             return DesignAnalysis(
                 description=prompt,
@@ -268,7 +273,11 @@ Original prompt: {prompt}
             elif "```" in response:
                 json_str = response.split("```")[1].split("```")[0].strip()
 
-            data = json.loads(json_str)
+            try:
+                data = json.loads(json_str)
+            except json.JSONDecodeError as je:
+                log.warning(f"JSON parsing failed, using fallback: {je}")
+                raise je
 
             return ConstructionPlan(
                 steps=data.get("steps", []),
@@ -278,7 +287,7 @@ Original prompt: {prompt}
             )
 
         except Exception as e:
-            log.error(f"Planner failed: {e}")
+            log.warning(f"Planner using fallback plan: {e}")
             # Fallback simple
             return ConstructionPlan(
                 steps=[
