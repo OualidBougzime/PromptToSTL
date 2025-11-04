@@ -460,6 +460,18 @@ class CodeSynthesizerAgent:
 
         log.info(f"💻 Generating code: {analysis.description}")
 
+        # FAST-PATH : Pour formes simples, utiliser code validé (évite hallucinations LLM)
+        if (analysis.complexity == "simple" and
+            len(analysis.primitives_needed) == 1 and
+            analysis.primitives_needed[0] in ["cylinder", "sphere", "cone", "torus", "box"]):
+
+            primitive = analysis.primitives_needed[0]
+            params = analysis.parameters
+            log.info(f"🚀 Fast-path for simple shape: {primitive}")
+
+            # Générer directement le code validé
+            return self._generate_simple_shape_code(primitive, params)
+
         system_prompt = """You are an expert CadQuery code generator. Generate clean, working CadQuery code based on the construction plan.
 
 === CRITICAL: CADQUERY API REFERENCE ===
@@ -688,6 +700,68 @@ print(f"✅ STL exported to: {{output_path}}")
                 primitives_used=[primitive],
                 confidence=0.5
             )
+
+    def _generate_simple_shape_code(self, primitive: str, params: Dict[str, Any]) -> GeneratedCode:
+        """Génère du code validé pour les formes simples (fast-path, évite les hallucinations LLM)"""
+
+        # Générer le code de forme spécifique
+        if primitive == "cylinder":
+            radius = params.get("radius", 25)
+            height = params.get("height", 50)
+            shape_code = f'result = cq.Workplane("XY").circle({radius}).extrude({height})'
+
+        elif primitive == "sphere":
+            radius = params.get("radius", 25)
+            shape_code = f'result = cq.Workplane("XY").sphere({radius})'
+
+        elif primitive == "cone":
+            r1 = params.get("radius1", params.get("base_radius", 30))
+            r2 = params.get("radius2", params.get("top_radius", 0))
+            h = params.get("height", 50)
+            shape_code = f'''result = (cq.Workplane("XY")
+    .circle({r1})
+    .workplane(offset={h})
+    .circle({r2})
+    .loft())'''
+
+        elif primitive == "torus":
+            # CRITICAL: Utiliser plan XZ pour revolve autour de l'axe Y
+            major_r = params.get("major_radius", params.get("major", 40))
+            minor_r = params.get("minor_radius", params.get("minor", 10))
+            shape_code = f'''# Create circular profile on XZ plane
+profile = cq.Workplane("XZ").moveTo({major_r}, 0).circle({minor_r})
+# Revolve around Y-axis
+result = profile.revolve(360, (0, 0, 0), (0, 1, 0))'''
+
+        else:  # box
+            w = params.get("width", 50)
+            h = params.get("height", 50)
+            d = params.get("depth", 50)
+            shape_code = f'result = cq.Workplane("XY").box({w}, {h}, {d})'
+
+        # Code complet avec imports et export
+        code = f"""import cadquery as cq
+from pathlib import Path
+
+# Generate {primitive}
+{shape_code}
+
+# Export to STL
+output_dir = Path(__file__).parent / "output"
+output_dir.mkdir(exist_ok=True)
+output_path = output_dir / "generated_cot_generated.stl"
+cq.exporters.export(result, str(output_path))
+print(f"✅ STL exported to: {{output_path}}")
+"""
+
+        log.info(f"✅ Generated validated code for {primitive} (fast-path)")
+
+        return GeneratedCode(
+            code=code,
+            language="python",
+            primitives_used=[primitive],
+            confidence=0.95  # Haute confiance : code validé manuellement
+        )
 
 
 # ========== EXPORTS ==========
