@@ -11,14 +11,14 @@ class AnalystAgent:
     
     APPLICATION_KEYWORDS = {
         'splint': ['splint', 'orthosis', 'orthèse', 'brace', 'hand', 'wrist', 'forearm', 'finger'],
-        'stent': ['stent', 'vascular', 'serpentine', 'expandable', 'ring', 'strut', 'peak', 'valley'],
-        'facade_pyramid': ['pyramid facade', 'hexagonal pyramid', 'triangle pyramid', 'hub', 'pyramidal'],  # 🔥 MODIFIÉ
-        'honeycomb': ['honeycomb panel', 'alveolar', 'hexagonal cells', 'hex panel', 'cellular panel', 'honeycomb'],  # 🔥 MODIFIÉ
+        'stent': ['stent', 'vascular', 'serpentine', 'expandable'],  # 🔥 Restreint - pas de 'ring', 'strut', 'helical'
+        'facade_pyramid': ['pyramid facade', 'hexagonal pyramid', 'triangle pyramid', 'pyramidal'],  # 🔥 Retiré 'hub' générique
+        'honeycomb': ['honeycomb panel', 'alveolar', 'hexagonal cells', 'hex panel', 'cellular panel'],  # 🔥 Plus spécifique
         'louvre_wall': ['louvre', 'louver', 'slat', 'diagonal', 'pavilion', 'lattice wall'],
         'sine_wave_fins': ['sine', 'wave', 'fins', 'undulating', 'ribbed', 'zahner'],
         'lattice': ['lattice', 'truss', 'cellular', 'gyroid', 'diamond', 'cubic', 'octet', 'kelvin'],
-        'gripper': ['gripper', 'cross', 'medical', 'surgical', 'holder', 'clamp', 'arm'],
-        'heatsink': ['heatsink', 'heat sink', 'cooling', 'fins', 'thermal', 'dissipator', 'radiator', 'bars']
+        'gripper': ['gripper', 'surgical gripper', 'medical gripper'],  # 🔥 Très restreint - pas de 'arm', 'clamp', 'holder' génériques
+        'heatsink': ['heatsink', 'heat sink', 'cooling fins', 'thermal dissipator', 'radiator']  # 🔥 Plus spécifique
     }
     
     async def analyze(self, prompt: str) -> Dict[str, Any]:
@@ -84,61 +84,60 @@ class AnalystAgent:
         }
     
     def _detect_application_type(self, prompt: str) -> str:
-        """Détecte le type d'application basé sur les mots-clés"""
+        """Détecte le type d'application basé sur les mots-clés avec détection plus stricte"""
         scores = {app: 0 for app in self.APPLICATION_KEYWORDS}
-        
+
         for app_type, keywords in self.APPLICATION_KEYWORDS.items():
             for keyword in keywords:
                 if keyword in prompt:
                     scores[app_type] += 1
-        
-        # 1. HEATSINK
+
+        # Règles strictes de détection (par ordre de priorité)
+
+        # 1. HEATSINK - Très spécifique
         if 'heatsink' in prompt or 'heat sink' in prompt:
             return 'heatsink'
-        
-        # 2. LOUVRE WALL - AVANT GRIPPER !  🔥🔥🔥
+
+        # 2. LOUVRE WALL - AVANT GRIPPER !
         if 'louvre' in prompt or 'louver' in prompt or 'pavilion' in prompt:
             return 'louvre_wall'
         
-        # 3. GRIPPER
-        if 'gripper' in prompt or ('cross' in prompt and 'medical' in prompt):  # 🔥 Condition plus stricte
+        # 3. GRIPPER - Requiert le mot exact "gripper"
+        if 'gripper' in prompt:
             return 'gripper'
-        
-        # 4. HONEYCOMB PANEL
-        if ('honeycomb panel' in prompt or 'alveolar' in prompt or 
-            'hexagonal cells' in prompt or 'cellular panel' in prompt or
-            ('honeycomb' in prompt and 'pyramid' not in prompt)):
-            return 'honeycomb'
-        
-        # 4. PYRAMID FACADE (après honeycomb)
-        # Détecte : "pyramid", "hexagonal pyramid", "pyramidal"
-        if ('pyramid' in prompt or 'pyramidal' in prompt or 
-            ('hexagon' in prompt and ('triangle' in prompt or 'hub' in prompt))):
-            return 'facade_pyramid'
-        
-        # 5. SINE WAVE FINS
-        if 'sine' in prompt or 'wave' in prompt or 'zahner' in prompt:
-            return 'sine_wave_fins'
-        
-        # 6. LOUVRE WALL
-        if 'louvre' in prompt or 'louver' in prompt or 'slat' in prompt or 'diagonal' in prompt:
-            return 'louvre_wall'
-        
-        # 7. STENT
-        if 'stent' in prompt and 'serpentine' in prompt:
+
+        # 4. STENT - Requiert au moins 2 mots-clés spécifiques
+        if 'stent' in prompt and ('serpentine' in prompt or 'vascular' in prompt or 'expandable' in prompt):
             return 'stent'
-        
-        # 8. LATTICE
+
+        # 5. HONEYCOMB PANEL - Requiert "honeycomb" + contexte
+        if ('honeycomb panel' in prompt or 'alveolar' in prompt or
+            'hexagonal cells' in prompt or 'cellular panel' in prompt or
+            ('honeycomb' in prompt and ('panel' in prompt or 'cell' in prompt))):
+            return 'honeycomb'
+
+        # 6. PYRAMID FACADE - Requiert "pyramid" explicite
+        if 'pyramid facade' in prompt or 'hexagonal pyramid' in prompt or 'pyramidal' in prompt:
+            return 'facade_pyramid'
+
+        # 7. SINE WAVE FINS - Requiert combinaison "sine" ou "wave" + "fins"
+        if (('sine' in prompt or 'wave' in prompt) and 'fin' in prompt) or 'zahner' in prompt:
+            return 'sine_wave_fins'
+
+        # 8. LATTICE - Requiert mots-clés spécifiques de structures lattice
         lattice_words = ['lattice', 'cubic cell', 'diamond cell', 'gyroid', 'octet', 'kelvin', 'bcc', 'fcc']
         if any(word in prompt for word in lattice_words):
             return 'lattice'
-        
+
+        # 9. Score-based detection with higher threshold
         detected = max(scores, key=scores.get)
 
-        if scores[detected] == 0:
-            log.info("🧠 No template keywords found → routing to Chain-of-Thought")
+        # Requiert au moins 2 matches pour considérer un template valide
+        if scores[detected] < 2:
+            log.info("🧠 No strong template match (score < 2) → routing to Chain-of-Thought")
             return 'unknown'
 
+        log.info(f"✅ Template detected via scoring: {detected} (score: {scores[detected]})")
         return detected
 
     def _analyze_heatsink(self, prompt: str) -> Dict[str, Any]:
