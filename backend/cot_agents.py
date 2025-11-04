@@ -491,11 +491,15 @@ Only use these validated methods to avoid errors:
 
 WORKING EXAMPLES:
 
-Torus:
+Torus (⚠️ MUST use XZ plane for Y-axis revolve):
 ```python
+# Step 1: Create circular profile on XZ plane
+# moveTo(major_radius, 0) positions the circle
 profile = cq.Workplane("XZ").moveTo(40, 0).circle(10)
+# Step 2: Revolve around Y-axis (vertical: 0,1,0)
 result = profile.revolve(360, (0, 0, 0), (0, 1, 0))
 ```
+⚠️ Common mistake: Using XY plane causes "No pending wires" error!
 
 Cone/Frustum:
 ```python
@@ -535,6 +539,7 @@ CRITICAL RULES:
 4. Use cutThruAll() not cut() for through holes
 5. Chain operations: .method1().method2().method3()
 6. End with: result = <final_shape>
+7. ⚠️ TORUS: Profile MUST be on XZ plane (not XY) for Y-axis revolve!
 
 Output ONLY the Python code, no explanations.
 """
