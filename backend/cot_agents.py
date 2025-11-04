@@ -461,8 +461,8 @@ class CodeSynthesizerAgent:
         log.info(f"💻 Generating code: {analysis.description}")
 
         # FAST-PATH : Pour formes simples, utiliser code validé (évite hallucinations LLM)
-        if (analysis.complexity == "simple" and
-            len(analysis.primitives_needed) == 1 and
+        # On vérifie juste si c'est un seul primitive de base, peu importe la complexity
+        if (len(analysis.primitives_needed) == 1 and
             analysis.primitives_needed[0] in ["cylinder", "sphere", "cone", "torus", "box"]):
 
             primitive = analysis.primitives_needed[0]
