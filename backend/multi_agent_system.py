@@ -814,10 +814,11 @@ class ErrorHandlerAgent:
         # Classification des erreurs
         self.error_categories = {
             "syntax": ["SyntaxError", "IndentationError", "TabError"],
-            "runtime": ["NameError", "TypeError", "AttributeError", "ValueError"],
+            "runtime": ["NameError", "TypeError", "AttributeError"],
             "import": ["ImportError", "ModuleNotFoundError"],
             "memory": ["MemoryError", "RecursionError"],
-            "geometry": ["topology", "invalid shape", "degenerate"],
+            "geometry": ["topology", "invalid shape", "degenerate", "no pending wires",
+                        "brep_api: command not done", "valueerror", "revolve", "loft"],
         }
 
         log.info("🚨 ErrorHandlerAgent initialized")
@@ -1048,7 +1049,7 @@ result = profile.revolve(360, (0, 0, 0), (0, 1, 0))''',
 
         errors_text = "\n".join([f"- {e}" for e in errors[:3]])  # Max 3 erreurs
 
-        prompt = f"""Fix the following Python code errors:
+        prompt = f"""Fix the following CadQuery Python code errors:
 
 Errors:
 {errors_text}
@@ -1057,6 +1058,26 @@ Code:
 ```python
 {code[:1000]}
 ```
+
+COMMON CADQUERY FIXES:
+
+1. "No pending wires present" when using revolve():
+   - Ensure the profile is on the correct plane (XZ for vertical revolve)
+   - The circle/shape must be closed and valid
+   - Example: profile = cq.Workplane("XZ").moveTo(40, 0).circle(10)
+
+2. "BRep_API: command not done" errors:
+   - Check revolve axis format: revolve(360, (0,0,0), (0,1,0))
+   - Ensure shapes are properly closed
+   - Avoid degenerate geometry (zero-size features)
+
+3. Torus generation:
+   CORRECT:
+   profile = cq.Workplane("XZ").moveTo(major_radius, 0).circle(minor_radius)
+   result = profile.revolve(360, (0, 0, 0), (0, 1, 0))
+
+4. Sphere generation:
+   CORRECT: result = cq.Workplane("XY").sphere(radius)
 
 Provide the corrected code:
 ```python
