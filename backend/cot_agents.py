@@ -226,32 +226,57 @@ BAD:  "parameters": {"angle": 45 * 30}
             # Fallback intelligent - détecte les formes basiques dans le prompt
             prompt_lower = prompt.lower()
 
+            # Fonction helper pour extraire les dimensions du prompt
+            def extract_dimension(text: str, keywords: List[str]) -> Optional[float]:
+                """Extrait une dimension numérique après un mot-clé"""
+                for keyword in keywords:
+                    # Pattern: keyword [=:] number [unit]
+                    pattern = rf"{keyword}\s*[=:]?\s*(\d+(?:\.\d+)?)\s*(?:mm|cm|m)?"
+                    match = re.search(pattern, text, re.IGNORECASE)
+                    if match:
+                        return float(match.group(1))
+                return None
+
             # Détection de forme
             if "cylinder" in prompt_lower or "cylindre" in prompt_lower:
                 primitives = ["cylinder"]
                 operations = ["create_workplane", "create_cylinder"]
-                params = {"radius": 25, "height": 50}
+                radius = extract_dimension(prompt_lower, ["radius", "rayon", "r"]) or 25
+                height = extract_dimension(prompt_lower, ["height", "hauteur", "h", "length"]) or 50
+                params = {"radius": radius, "height": height}
                 desc = "Simple cylinder"
             elif "sphere" in prompt_lower or "ball" in prompt_lower:
                 primitives = ["sphere"]
                 operations = ["create_workplane", "create_sphere"]
-                params = {"radius": 25}
+                radius = extract_dimension(prompt_lower, ["radius", "rayon", "r", "diameter", "diametre"]) or 25
+                # Si c'est un diamètre, diviser par 2
+                if "diameter" in prompt_lower or "diametre" in prompt_lower:
+                    radius = radius / 2
+                params = {"radius": radius}
                 desc = "Simple sphere"
             elif "cone" in prompt_lower:
                 primitives = ["cone"]
                 operations = ["create_workplane", "create_cone"]
-                params = {"radius1": 30, "radius2": 0, "height": 50}
+                r1 = extract_dimension(prompt_lower, ["base.?radius", "bottom.?radius", "radius1", "r1"]) or 30
+                r2 = extract_dimension(prompt_lower, ["top.?radius", "radius2", "r2"]) or 0
+                height = extract_dimension(prompt_lower, ["height", "hauteur", "h"]) or 50
+                params = {"radius1": r1, "radius2": r2, "height": height}
                 desc = "Simple cone"
             elif "torus" in prompt_lower:
                 primitives = ["torus"]
                 operations = ["create_workplane", "create_torus"]
-                params = {"major_radius": 30, "minor_radius": 10}
+                major = extract_dimension(prompt_lower, ["major.?radius", "outer.?radius", "big.?radius"]) or 40
+                minor = extract_dimension(prompt_lower, ["minor.?radius", "inner.?radius", "small.?radius", "tube.?radius"]) or 10
+                params = {"major_radius": major, "minor_radius": minor}
                 desc = "Simple torus"
             else:
                 # Par défaut: cube/box
                 primitives = ["box"]
                 operations = ["create_workplane", "create_box"]
-                params = {"width": 50, "height": 50, "depth": 50}
+                width = extract_dimension(prompt_lower, ["width", "largeur", "w"]) or 50
+                height = extract_dimension(prompt_lower, ["height", "hauteur", "h"]) or 50
+                depth = extract_dimension(prompt_lower, ["depth", "profondeur", "d", "length"]) or 50
+                params = {"width": width, "height": height, "depth": depth}
                 desc = "Simple box"
 
             return DesignAnalysis(
@@ -614,16 +639,24 @@ print(f"✅ STL exported to: {output_path}")
             if primitive == "cylinder":
                 shape_code = f'result = cq.Workplane("XY").circle({params.get("radius", 25)}).extrude({params.get("height", 50)})'
             elif primitive == "sphere":
-                shape_code = f'result = cq.Workplane("XY").sphere({params.get("radius", 25)})'
+                # Utiliser sphere() directement - plus fiable que revolve
+                radius = params.get("radius", 25)
+                shape_code = f'result = cq.Workplane("XY").sphere({radius})'
             elif primitive == "cone":
-                r1 = params.get("radius1", 30)
-                r2 = params.get("radius2", 0)
+                r1 = params.get("radius1", params.get("base_radius", 30))
+                r2 = params.get("radius2", params.get("top_radius", 0))
                 h = params.get("height", 50)
                 shape_code = f'''result = (cq.Workplane("XY")
     .circle({r1})
     .workplane(offset={h})
     .circle({r2})
     .loft())'''
+            elif primitive == "torus":
+                # Torus : revolve un cercle autour d'un axe
+                major_r = params.get("major_radius", params.get("major", 40))
+                minor_r = params.get("minor_radius", params.get("minor", 10))
+                shape_code = f'''profile = cq.Workplane("XZ").moveTo({major_r}, 0).circle({minor_r})
+result = profile.revolve(360, (0, 0, 0), (0, 1, 0))'''
             else:
                 # Box par défaut
                 w = params.get("width", 50)

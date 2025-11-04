@@ -433,6 +433,13 @@ class OrchestratorAgent:
 
                 # Si la fonction ne retourne pas un AgentResult, le wrapper
                 if not isinstance(result, AgentResult):
+                    # Vérifier si c'est un dict avec success=False
+                    if isinstance(result, dict) and result.get("success") is False:
+                        return AgentResult(
+                            status=AgentStatus.FAILED,
+                            data=result,
+                            errors=result.get("errors", ["Unknown error"])
+                        )
                     return AgentResult(status=AgentStatus.SUCCESS, data=result)
 
                 if result.status == AgentStatus.SUCCESS:
