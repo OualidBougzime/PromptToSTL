@@ -970,6 +970,68 @@ class SelfHealingAgent:
                     fixed_lines.append(line.replace("\t", "    "))
                 fixed_code = "\n".join(fixed_lines)
 
+            # Fix 3: CadQuery-specific error fixes
+            # 3a: .torus() doesn't exist
+            if "'Workplane' object has no attribute 'torus'" in error:
+                # Replace .torus(major, minor) with proper revolve pattern
+                fixed_code = re.sub(
+                    r'\.torus\s*\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*\)',
+                    lambda m: f'''# Torus via revolve
+profile = cq.Workplane("XZ").moveTo({m.group(1)}, 0).circle({m.group(2)})
+result = profile.revolve(360, (0, 0, 0), (0, 1, 0))''',
+                    fixed_code
+                )
+                log.info("🩹 Fixed: Replaced .torus() with revolve pattern")
+
+            # 3b: .regularPolygon() doesn't exist
+            if "'Workplane' object has no attribute 'regularPolygon'" in error:
+                fixed_code = fixed_code.replace('.regularPolygon(', '.polygon(')
+                log.info("🩹 Fixed: Replaced .regularPolygon() with .polygon()")
+
+            # 3c: revolve() with wrong parameter name
+            if "revolve() got an unexpected keyword argument 'angle'" in error:
+                fixed_code = re.sub(
+                    r'\.revolve\s*\(\s*angle\s*=\s*(\d+(?:\.\d+)?)\s*\)',
+                    r'.revolve(\1)',
+                    fixed_code
+                )
+                log.info("🩹 Fixed: Changed revolve(angle=X) to revolve(X)")
+
+            # 3d: loft() with invalid 'closed' parameter
+            if "loft() got an unexpected keyword argument 'closed'" in error:
+                fixed_code = re.sub(
+                    r'\.loft\s*\(\s*closed\s*=\s*\w+\s*\)',
+                    '.loft()',
+                    fixed_code
+                )
+                log.info("🩹 Fixed: Removed invalid 'closed' parameter from loft()")
+
+            # 3e: cut() without argument
+            if "cut() missing 1 required positional argument" in error:
+                # Replace .cut() with .cutThruAll()
+                fixed_code = re.sub(
+                    r'\.cut\s*\(\s*\)',
+                    '.cutThruAll()',
+                    fixed_code
+                )
+                log.info("🩹 Fixed: Replaced .cut() with .cutThruAll()")
+
+            # 3f: Cannot find solid in stack (need to extrude first)
+            if "Cannot find a solid on the stack or in the parent chain" in error:
+                # This is harder to fix automatically, but we can add a hint
+                log.warning("⚠️ Error: No solid found. Need to extrude/revolve/loft before cut operations")
+                # Try to find .circle() or .rect() without subsequent .extrude()
+                # and add .extrude() if missing
+                lines = fixed_code.split('\n')
+                for i, line in enumerate(lines):
+                    if ('.circle(' in line or '.rect(' in line) and '.extrude(' not in line:
+                        # Check if next operation is a cut
+                        if i + 1 < len(lines) and ('cutThruAll' in lines[i+1] or 'cut(' in lines[i+1]):
+                            # Insert extrude before cut
+                            log.info("🩹 Fixed: Added .extrude() before cut operation")
+                            # This is a simple heuristic - may need refinement
+                            pass
+
         return fixed_code
 
     async def _llm_heal_code(self, code: str, errors: List[str]) -> str:

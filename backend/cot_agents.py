@@ -437,31 +437,79 @@ class CodeSynthesizerAgent:
 
         system_prompt = """You are an expert CadQuery code generator. Generate clean, working CadQuery code based on the construction plan.
 
-IMPORTANT RULES:
-1. Start with: import cadquery as cq
-2. Create the shape step by step following the plan
-3. End with: result = <final_shape>
-4. Use proper CadQuery syntax
-5. Add comments for clarity
-6. Handle errors gracefully
-7. Ensure all operations are chained correctly
+=== CRITICAL: CADQUERY API REFERENCE ===
+Only use these validated methods to avoid errors:
 
-Example structure:
+✅ VALID METHODS:
+- box(length, width, height): Create a box
+- sphere(radius): Create a sphere
+- circle(radius).extrude(height): Cylinder
+- polygon(nSides, diameter): Regular polygon (hexagon: nSides=6)
+- rect(width, height): Rectangle
+- extrude(distance): Extrude 2D to 3D
+- revolve([angleDegrees]): Revolve (angle is POSITIONAL, not kwarg!)
+- loft(): Loft between sections (no 'closed' parameter)
+- fillet(radius), chamfer(length): Edge modifications
+- cutThruAll(), cutBlind(depth): Cut operations
+- union(shape), intersect(shape): Boolean operations
+- faces(">Z"), edges("|Z"): Selection
+- workplane(offset=z): New workplane
+- polarArray(r, start, angle, count): Circular pattern
+
+❌ THESE DO NOT EXIST (common hallucinations):
+- .torus() → Use revolve instead
+- .regularPolygon() → Use .polygon()
+- .cone() → Use circle+loft pattern
+- revolve(angle=X) → Use revolve(X) positional
+- loft(closed=True) → No 'closed' param
+- cut() without argument → Use cutThruAll()
+
+WORKING EXAMPLES:
+
+Torus:
+```python
+profile = cq.Workplane("XZ").moveTo(40, 0).circle(10)
+result = profile.revolve(360, (0, 0, 0), (0, 1, 0))
+```
+
+Cone/Frustum:
+```python
+result = (cq.Workplane("XY")
+    .circle(40)
+    .workplane(offset=80)
+    .circle(10)
+    .loft())
+```
+
+Hexagon:
+```python
+result = cq.Workplane("XY").polygon(6, 30).extrude(15)
+```
+
+Gear (simplified):
 ```python
 import cadquery as cq
-
-# Step 1: Create base
-result = cq.Workplane("XY")
-
-# Step 2: Create main body
-result = result.box(50, 50, 50)
-
-# Step 3: Add features
-result = result.faces(">Z").circle(10).extrude(5)
-
-# Final result
-result
+result = (cq.Workplane("XY")
+    .circle(20)
+    .extrude(10)
+    .faces(">Z")
+    .circle(4)
+    .cutThruAll())
+# Add teeth using polarArray
+result = (result.faces(">Z")
+    .workplane()
+    .polarArray(18, 0, 360, 20)
+    .rect(2, 3)
+    .extrude(2))
 ```
+
+CRITICAL RULES:
+1. Import: import cadquery as cq
+2. Must create 3D solid (extrude/revolve/loft) before cut/union
+3. revolve() angle is POSITIONAL: revolve(90) not revolve(angle=90)
+4. Use cutThruAll() not cut() for through holes
+5. Chain operations: .method1().method2().method3()
+6. End with: result = <final_shape>
 
 Output ONLY the Python code, no explanations.
 """
