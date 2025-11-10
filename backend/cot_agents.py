@@ -135,8 +135,13 @@ class OllamaCoTClient:
                 primitive = "cone"
                 operations = ["create_workplane", "create_cone"]
                 params = {"radius1": 40, "radius2": 10, "height": 80}
+            elif "cube" in user_msg or "box" in user_msg or "boîte" in user_msg or "carré" in user_msg:
+                # Détection explicite de cube/box
+                primitive = "box"
+                operations = ["create_workplane", "create_box"]
+                params = {"width": 50, "height": 50, "depth": 50}
             else:
-                # Box par défaut
+                # Box par défaut si aucune forme détectée
                 primitive = "box"
                 operations = ["create_workplane", "create_box"]
                 params = {"width": 50, "height": 50, "depth": 50}
@@ -181,8 +186,14 @@ class OllamaCoTClient:
                     {"operation": "circle", "parameters": {"radius": 10}, "description": "Create top circle"},
                     {"operation": "loft", "parameters": {}, "description": "Loft between circles"}
                 ]
+            elif "cube" in user_msg or "box" in user_msg or "boîte" in user_msg or "carré" in user_msg:
+                # Détection explicite de cube/box
+                steps = [
+                    {"operation": "Workplane", "parameters": {"plane": "XY"}, "description": "Create base plane"},
+                    {"operation": "box", "parameters": {"length": 50, "width": 50, "height": 50}, "description": "Create box"}
+                ]
             else:
-                # Box par défaut
+                # Box par défaut si aucune forme détectée
                 steps = [
                     {"operation": "Workplane", "parameters": {"plane": "XY"}, "description": "Create base plane"},
                     {"operation": "box", "parameters": {"length": 50, "width": 50, "height": 50}, "description": "Create box"}
@@ -265,8 +276,24 @@ output_path = output_dir / "generated_cot_generated.stl"
 cq.exporters.export(result, str(output_path))
 print(f"✅ STL exported to: {output_path}")
 ```'''
+            elif "cube" in user_msg or "box" in user_msg or "boîte" in user_msg or "carré" in user_msg:
+                # Détection explicite de cube/box
+                code = '''```python
+import cadquery as cq
+from pathlib import Path
+
+# Fallback: Box
+result = cq.Workplane("XY").box(50, 50, 50)
+
+# Export to STL
+output_dir = Path(__file__).parent / "output"
+output_dir.mkdir(exist_ok=True)
+output_path = output_dir / "generated_cot_generated.stl"
+cq.exporters.export(result, str(output_path))
+print(f"✅ STL exported to: {output_path}")
+```'''
             else:
-                # Cube par défaut
+                # Cube par défaut si aucune forme détectée
                 code = '''```python
 import cadquery as cq
 from pathlib import Path

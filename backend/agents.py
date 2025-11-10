@@ -611,20 +611,16 @@ class ValidatorAgent:
 
         try:
             exec(compile(code, "<cad>", "exec"), ns)
-            
+
             backend_dir = Path(__file__).parent
             output_dir = backend_dir / "output"
-            
-            expected_filename = f"generated_{app_type}.stl"
-            stl_path_expected = output_dir / expected_filename
-            
+
             time.sleep(0.1)
-            
-            if stl_path_expected.exists():
-                stl_path = str(stl_path_expected.absolute())
-            else:
-                stl_files = sorted(output_dir.glob("generated_*.stl"), key=lambda p: p.stat().st_mtime, reverse=True)
-                stl_path = str(stl_files[0].absolute()) if stl_files else None
+
+            # TOUJOURS chercher le fichier .stl le plus récent (pas seulement generated_*.stl)
+            # Cela corrige le bug où un vieux fichier était retourné au lieu du nouveau
+            stl_files = sorted(output_dir.glob("*.stl"), key=lambda p: p.stat().st_mtime, reverse=True)
+            stl_path = str(stl_files[0].absolute()) if stl_files else None
             
         except Exception as e:
             log.error(f"Execution failed: {e}", exc_info=True)
