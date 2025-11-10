@@ -921,8 +921,16 @@ class SelfHealingAgent:
 
         log.info(f"🩹 Attempting to heal code ({len(errors)} error(s))")
 
+        # Log original code for debugging
+        log.debug(f"📝 Original code (first 500 chars):\n{code[:500]}")
+
         # Tentative de correction basique d'abord
         fixed_code = self._basic_fixes(code, errors)
+
+        # Log if code was modified
+        if fixed_code != code:
+            log.info(f"🔧 Code was modified by _basic_fixes")
+            log.debug(f"📝 Fixed code (first 500 chars):\n{fixed_code[:500]}")
 
         # Si correction basique insuffisante, utiliser LLM
         if fixed_code == code and len(errors) > 0:
@@ -931,7 +939,18 @@ class SelfHealingAgent:
         # Vérifier si le code est corrigé
         try:
             compile(fixed_code, "<healed>", "exec")
-            log.info("✅ Code healed successfully")
+
+            # Log the final fixed code
+            if fixed_code != code:
+                log.info(f"✅ Code healed successfully (modified)")
+                # Show what changed
+                original_lines = code.split('\n')
+                fixed_lines = fixed_code.split('\n')
+                for i, (orig, fixed) in enumerate(zip(original_lines, fixed_lines)):
+                    if orig != fixed:
+                        log.info(f"  Line {i+1}: '{orig.strip()}' → '{fixed.strip()}'")
+            else:
+                log.warning(f"⚠️ Code compiled but was not modified by healing")
 
             return AgentResult(
                 status=AgentStatus.SUCCESS,
