@@ -624,7 +624,9 @@ class ValidatorAgent:
             
         except Exception as e:
             log.error(f"Execution failed: {e}", exc_info=True)
-            return {"success": False, "errors": [f"Execution: {e}"]}
+            # Include exception type in error message so ErrorHandlerAgent can categorize it
+            error_type = type(e).__name__
+            return {"success": False, "errors": [f"Execution: {error_type}: {e}"]}
 
         if stl_path and os.path.exists(stl_path):
             mesh = self._create_mesh_from_stl(stl_path)
