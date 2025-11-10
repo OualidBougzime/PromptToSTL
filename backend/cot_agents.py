@@ -218,7 +218,7 @@ from pathlib import Path
 
 # Fallback: Torus
 profile = cq.Workplane("XZ").moveTo(40, 0).circle(10)
-result = profile.revolve(360, (0, 0, 0), (0, 1, 0))
+result = profile.revolve(360, (0, 0, 0), (0, 1, 0), clean=False)
 
 # Export to STL
 output_dir = Path(__file__).parent / "output"
@@ -749,13 +749,20 @@ import cadquery as cq
 # Create circular profile on XZ plane at major radius distance
 profile = cq.Workplane("XZ").moveTo(40, 0).circle(10)
 # Revolve 360° around Y-axis to create torus
-result = profile.revolve(360, (0, 0, 0), (0, 1, 0))
+# CRITICAL: clean=False is REQUIRED for 360° revolves to prevent BRep_API errors
+result = profile.revolve(360, (0, 0, 0), (0, 1, 0), clean=False)
 ```
+
+🚨 CRITICAL REVOLVE RULES:
+- For 360° revolves (full circles): ALWAYS use clean=False
+- For partial revolves (<360°): clean=True is optional
+- Missing clean=False causes "BRep_API: command not done" on torus/cylinder
 
 ❌ WRONG (THIS WILL CRASH - NO .torus() METHOD):
 ```python
 result = cq.Workplane("XY").torus(40, 10)  # AttributeError!
 result = cq.Workplane().torus(...)  # AttributeError!
+result = profile.revolve(360, (0, 0, 0), (0, 1, 0))  # ❌ Missing clean=False!
 ```
 
 ⚠️ Important: MUST use XZ plane (not XY) for Y-axis revolve, or you get "No pending wires" error!
