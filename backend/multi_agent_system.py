@@ -1067,6 +1067,8 @@ class SelfHealingAgent:
                         # Check if next operation is a cut
                         if i + 1 < len(lines) and ('cutThruAll' in lines[i+1] or 'cut(' in lines[i+1]):
                             # Insert extrude before cut
+                            # TODO: Implement automatic .extrude() insertion
+                            pass
 
             # 3g: BRep_API command not done - CRITICAL for torus revolve
             # This happens when using wrong workplane for revolve (e.g., XY instead of XZ for Y-axis revolve)
