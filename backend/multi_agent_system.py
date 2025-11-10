@@ -376,6 +376,15 @@ class OrchestratorAgent:
                 )
 
                 if error_result.metadata.get("can_retry", False):
+                    # Save generated code to file for debugging
+                    from pathlib import Path
+                    debug_file = Path(__file__).parent / "output" / "debug_generated_code.py"
+                    debug_file.parent.mkdir(exist_ok=True)
+                    with open(debug_file, 'w') as f:
+                        f.write("# Generated code that failed:\n")
+                        f.write(code)
+                    log.info(f"💾 Saved failed code to: {debug_file}")
+
                     # Retry avec correction
                     heal_result = await self.self_healing.heal_code(
                         code,
