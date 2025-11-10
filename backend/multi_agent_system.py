@@ -1075,20 +1075,20 @@ class SelfHealingAgent:
             if "BRep_API: command not done" in error or "brep_api: command not done" in error.lower():
                 log.info("🩹 Attempting to fix: BRep_API error (likely wrong workplane for revolve)")
 
-                # Find revolve operations around Y-axis
+                # Strategy: First copy all lines, then make modifications
                 lines = fixed_code.split('\n')
-                new_lines = []
 
+                # Find revolve operations around Y-axis and mark lines to fix
                 for i, line in enumerate(lines):
                     # Check if this line has a revolve with Y-axis (0, 1, 0)
                     if '.revolve(' in line and '(0, 1, 0)' in line:
                         # Look back to find the Workplane declaration
                         found_fix = False
-                        for j in range(i-1, max(0, i-5), -1):  # Look back up to 5 lines
-                            if 'Workplane("XY")' in lines[j]:
+                        for j in range(i-1, max(-1, i-5), -1):  # Look back up to 5 lines
+                            if j >= 0 and 'Workplane("XY")' in lines[j]:
                                 # FOUND THE BUG: XY plane with Y-axis revolve
-                                # Replace XY with XZ
-                                new_lines[j] = lines[j].replace('Workplane("XY")', 'Workplane("XZ")')
+                                # Replace XY with XZ directly in lines array
+                                lines[j] = lines[j].replace('Workplane("XY")', 'Workplane("XZ")')
                                 log.info("🩹 Fixed: Changed Workplane('XY') to Workplane('XZ') for Y-axis revolve")
                                 found_fix = True
                                 break
@@ -1096,12 +1096,10 @@ class SelfHealingAgent:
                         if not found_fix:
                             # Check if the Workplane is on the same line (method chaining)
                             if 'Workplane("XY")' in line:
-                                line = line.replace('Workplane("XY")', 'Workplane("XZ")')
-                                log.info("🩹 Fixed: Changed Workplane('XY') to Workplane('XZ') for Y-axis revolve")
+                                lines[i] = lines[i].replace('Workplane("XY")', 'Workplane("XZ")')
+                                log.info("🩹 Fixed: Changed Workplane('XY') to Workplane('XZ') for Y-axis revolve (inline)")
 
-                    new_lines.append(line)
-
-                fixed_code = '\n'.join(new_lines)
+                fixed_code = '\n'.join(lines)
 
         return fixed_code
 
