@@ -697,6 +697,14 @@ class CodeSynthesizerAgent:
 
 Your mission: Transform the construction plan into WORKING, EXECUTABLE CadQuery code.
 
+🚨 CRITICAL WARNING - READ THIS FIRST 🚨
+===========================================
+CadQuery does NOT have a .torus() method!
+If you need a TORUS, you MUST use the revolve pattern shown below.
+NEVER write: result = cq.Workplane("XY").torus(...)  ← THIS WILL CRASH!
+ALWAYS write: profile = cq.Workplane("XZ").moveTo(major_r, 0).circle(minor_r)
+             result = profile.revolve(360, (0, 0, 0), (0, 1, 0))
+
 CODE QUALITY REQUIREMENTS:
 1. CORRECTNESS: Code must execute without errors
 2. COMPLETENESS: Must include imports, creation, and export
@@ -721,26 +729,36 @@ Only use these VALIDATED methods (hallucinating non-existent methods causes fail
 - faces(">Z"), edges("|Z"): Selection
 - workplane(offset=z): New workplane
 - polarArray(r, start, angle, count): Circular pattern
+- moveTo(x, y): Move to position (used for torus profile)
 
 ❌ THESE DO NOT EXIST (common hallucinations):
-- .torus() → Use revolve instead
+- .torus(major, minor) → DOES NOT EXIST! Use revolve pattern below
 - .regularPolygon() → Use .polygon()
 - .cone() → Use circle+loft pattern
 - revolve(angle=X) → Use revolve(X) positional
 - loft(closed=True) → No 'closed' param
 - cut() without argument → Use cutThruAll()
 
-WORKING EXAMPLES:
+🚨 MANDATORY TORUS PATTERN (NO .torus() METHOD EXISTS!):
+========================================================
+For a torus with major_radius=40, minor_radius=10:
 
-Torus (⚠️ MUST use XZ plane for Y-axis revolve):
+✅ CORRECT (ONLY WAY THAT WORKS):
 ```python
-# Step 1: Create circular profile on XZ plane
-# moveTo(major_radius, 0) positions the circle
+import cadquery as cq
+# Create circular profile on XZ plane at major radius distance
 profile = cq.Workplane("XZ").moveTo(40, 0).circle(10)
-# Step 2: Revolve around Y-axis (vertical: 0,1,0)
+# Revolve 360° around Y-axis to create torus
 result = profile.revolve(360, (0, 0, 0), (0, 1, 0))
 ```
-⚠️ Common mistake: Using XY plane causes "No pending wires" error!
+
+❌ WRONG (THIS WILL CRASH - NO .torus() METHOD):
+```python
+result = cq.Workplane("XY").torus(40, 10)  # AttributeError!
+result = cq.Workplane().torus(...)  # AttributeError!
+```
+
+⚠️ Important: MUST use XZ plane (not XY) for Y-axis revolve, or you get "No pending wires" error!
 
 Cone/Frustum:
 ```python
