@@ -979,16 +979,47 @@ class SelfHealingAgent:
                 fixed_code = "\n".join(fixed_lines)
 
             # Fix 3: CadQuery-specific error fixes
-            # 3a: .torus() doesn't exist
+            # 3a: .torus() doesn't exist - CRITICAL FIX
             if "'Workplane' object has no attribute 'torus'" in error:
-                # Replace .torus(major, minor) with proper revolve pattern
-                fixed_code = re.sub(
-                    r'\.torus\s*\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*\)',
-                    lambda m: f'''# Torus via revolve
-profile = cq.Workplane("XZ").moveTo({m.group(1)}, 0).circle({m.group(2)})
-result = profile.revolve(360, (0, 0, 0), (0, 1, 0))''',
-                    fixed_code
-                )
+                # Strategy: Replace entire line containing .torus() with proper revolve pattern
+
+                # Find lines with .torus() call
+                lines = fixed_code.split('\n')
+                new_lines = []
+
+                for line in lines:
+                    if '.torus(' in line:
+                        # Extract variable name if exists (e.g., "result = ...")
+                        var_match = re.match(r'(\s*)(\w+)\s*=\s*.*\.torus\s*\(\s*([^,]+)\s*,\s*([^)]+)\s*\)', line)
+                        if var_match:
+                            indent = var_match.group(1)
+                            var_name = var_match.group(2)
+                            major_r = var_match.group(3).strip()
+                            minor_r = var_match.group(4).strip()
+
+                            # Replace with correct pattern
+                            new_lines.append(f'{indent}# Torus via revolve (fixed by SelfHealingAgent)')
+                            new_lines.append(f'{indent}profile = cq.Workplane("XZ").moveTo({major_r}, 0).circle({minor_r})')
+                            new_lines.append(f'{indent}{var_name} = profile.revolve(360, (0, 0, 0), (0, 1, 0))')
+                        else:
+                            # No variable assignment, just replace the call
+                            indent_match = re.match(r'(\s*)', line)
+                            indent = indent_match.group(1) if indent_match else ''
+
+                            # Try to extract parameters
+                            param_match = re.search(r'\.torus\s*\(\s*([^,]+)\s*,\s*([^)]+)\s*\)', line)
+                            if param_match:
+                                major_r = param_match.group(1).strip()
+                                minor_r = param_match.group(2).strip()
+                                new_lines.append(f'{indent}# Torus via revolve (fixed by SelfHealingAgent)')
+                                new_lines.append(f'{indent}profile = cq.Workplane("XZ").moveTo({major_r}, 0).circle({minor_r})')
+                                new_lines.append(f'{indent}result = profile.revolve(360, (0, 0, 0), (0, 1, 0))')
+                            else:
+                                new_lines.append(line)  # Keep original if can't parse
+                    else:
+                        new_lines.append(line)
+
+                fixed_code = '\n'.join(new_lines)
                 log.info("🩹 Fixed: Replaced .torus() with revolve pattern")
 
             # 3b: .regularPolygon() doesn't exist
