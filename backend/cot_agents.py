@@ -118,28 +118,84 @@ class OllamaCoTClient:
 
         # === ARCHITECT FALLBACK ===
         if is_architect:
+            # Détecter la forme demandée dans le prompt
+            if "torus" in user_msg:
+                primitive = "torus"
+                operations = ["create_workplane", "create_torus"]
+                params = {"major_radius": 40, "minor_radius": 10}
+            elif "cylinder" in user_msg or "cylindre" in user_msg:
+                primitive = "cylinder"
+                operations = ["create_workplane", "create_cylinder"]
+                params = {"radius": 25, "height": 60}
+            elif "sphere" in user_msg or "sphère" in user_msg:
+                primitive = "sphere"
+                operations = ["create_workplane", "create_sphere"]
+                params = {"radius": 30}
+            elif "cone" in user_msg or "cône" in user_msg:
+                primitive = "cone"
+                operations = ["create_workplane", "create_cone"]
+                params = {"radius1": 40, "radius2": 10, "height": 80}
+            else:
+                # Box par défaut
+                primitive = "box"
+                operations = ["create_workplane", "create_box"]
+                params = {"width": 50, "height": 50, "depth": 50}
+
             # Retourner un JSON valide pour ArchitectAgent
-            return '''{
-  "description": "Simple shape from fallback",
-  "primitives_needed": ["box"],
-  "operations_sequence": ["create_workplane", "create_box"],
-  "parameters": {"width": 50, "height": 50, "depth": 50},
-  "complexity": "simple",
-  "reasoning": "Fallback mode - Ollama unavailable"
-}'''
+            import json
+            return json.dumps({
+                "description": f"Simple {primitive} from fallback",
+                "primitives_needed": [primitive],
+                "operations_sequence": operations,
+                "parameters": params,
+                "complexity": "simple",
+                "reasoning": f"Fallback mode - Ollama unavailable, detected {primitive}"
+            })
 
         # === PLANNER FALLBACK ===
         elif is_planner:
+            # Détecter la forme demandée dans le prompt
+            if "torus" in user_msg:
+                steps = [
+                    {"operation": "Workplane", "parameters": {"plane": "XZ"}, "description": "Create XZ plane for torus"},
+                    {"operation": "moveTo", "parameters": {"x": 40, "y": 0}, "description": "Position at major radius"},
+                    {"operation": "circle", "parameters": {"radius": 10}, "description": "Create minor circle"},
+                    {"operation": "revolve", "parameters": {"angle": 360, "axis": [0, 1, 0]}, "description": "Revolve around Y-axis"}
+                ]
+            elif "cylinder" in user_msg or "cylindre" in user_msg:
+                steps = [
+                    {"operation": "Workplane", "parameters": {"plane": "XY"}, "description": "Create base plane"},
+                    {"operation": "circle", "parameters": {"radius": 25}, "description": "Create circle"},
+                    {"operation": "extrude", "parameters": {"distance": 60}, "description": "Extrude to height"}
+                ]
+            elif "sphere" in user_msg or "sphère" in user_msg:
+                steps = [
+                    {"operation": "Workplane", "parameters": {"plane": "XY"}, "description": "Create base plane"},
+                    {"operation": "sphere", "parameters": {"radius": 30}, "description": "Create sphere"}
+                ]
+            elif "cone" in user_msg or "cône" in user_msg:
+                steps = [
+                    {"operation": "Workplane", "parameters": {"plane": "XY"}, "description": "Create base plane"},
+                    {"operation": "circle", "parameters": {"radius": 40}, "description": "Create base circle"},
+                    {"operation": "workplane", "parameters": {"offset": 80}, "description": "Create top plane"},
+                    {"operation": "circle", "parameters": {"radius": 10}, "description": "Create top circle"},
+                    {"operation": "loft", "parameters": {}, "description": "Loft between circles"}
+                ]
+            else:
+                # Box par défaut
+                steps = [
+                    {"operation": "Workplane", "parameters": {"plane": "XY"}, "description": "Create base plane"},
+                    {"operation": "box", "parameters": {"length": 50, "width": 50, "height": 50}, "description": "Create box"}
+                ]
+
             # Retourner un JSON valide pour PlannerAgent
-            return '''{
-  "steps": [
-    {"operation": "Workplane", "parameters": {"plane": "XY"}, "description": "Create base plane"},
-    {"operation": "box", "parameters": {"length": 50, "width": 50, "height": 50}, "description": "Create box"}
-  ],
-  "variables": {},
-  "constraints": [],
-  "estimated_complexity": 2
-}'''
+            import json
+            return json.dumps({
+                "steps": steps,
+                "variables": {},
+                "constraints": [],
+                "estimated_complexity": len(steps)
+            })
 
         # === SYNTHESIZER FALLBACK ===
         elif is_synthesizer:
