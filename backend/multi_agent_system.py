@@ -1099,33 +1099,47 @@ class SelfHealingAgent:
                             pass
 
             # 3g: BRep_API command not done - CRITICAL for torus revolve
-            # This happens when using wrong workplane for revolve (e.g., XY instead of XZ for Y-axis revolve)
+            # This happens when using wrong workplane OR missing clean=False for 360° revolves
             if "BRep_API: command not done" in error or "brep_api: command not done" in error.lower():
-                log.info("🩹 Attempting to fix: BRep_API error (likely wrong workplane for revolve)")
+                log.info("🩹 Attempting to fix: BRep_API error (likely missing clean=False or wrong workplane)")
 
                 # Strategy: First copy all lines, then make modifications
                 lines = fixed_code.split('\n')
 
-                # Find revolve operations around Y-axis and mark lines to fix
+                # Find revolve operations and fix them
                 for i, line in enumerate(lines):
-                    # Check if this line has a revolve with Y-axis (0, 1, 0)
-                    if '.revolve(' in line and '(0, 1, 0)' in line:
-                        # Look back to find the Workplane declaration
-                        found_fix = False
-                        for j in range(i-1, max(-1, i-5), -1):  # Look back up to 5 lines
-                            if j >= 0 and 'Workplane("XY")' in lines[j]:
-                                # FOUND THE BUG: XY plane with Y-axis revolve
-                                # Replace XY with XZ directly in lines array
-                                lines[j] = lines[j].replace('Workplane("XY")', 'Workplane("XZ")')
-                                log.info("🩹 Fixed: Changed Workplane('XY') to Workplane('XZ') for Y-axis revolve")
-                                found_fix = True
-                                break
+                    if '.revolve(' in line:
+                        # Fix 1: Add clean=False for 360° revolves
+                        if '360' in line and 'clean=False' not in line:
+                            # Find the closing parenthesis of revolve() and add clean=False before it
+                            # Handle both revolve(360) and revolve(360, ...)
+                            if '.revolve(360)' in line:
+                                lines[i] = line.replace('.revolve(360)', '.revolve(360, clean=False)')
+                                log.info("🩹 Fixed: Added clean=False to revolve(360)")
+                            elif 'revolve(360,' in line and ')' in line:
+                                # Find last ) before any comment or end of line
+                                parts = line.split('#')[0]  # Remove comments
+                                if parts.rstrip().endswith(')'):
+                                    lines[i] = parts.rstrip()[:-1] + ', clean=False)' + ('#' + line.split('#')[1] if '#' in line else '')
+                                    log.info("🩹 Fixed: Added clean=False to revolve(360, ...)")
 
-                        if not found_fix:
-                            # Check if the Workplane is on the same line (method chaining)
-                            if 'Workplane("XY")' in line:
-                                lines[i] = lines[i].replace('Workplane("XY")', 'Workplane("XZ")')
-                                log.info("🩹 Fixed: Changed Workplane('XY') to Workplane('XZ') for Y-axis revolve (inline)")
+                        # Fix 2: Check workplane for Y-axis revolves
+                        if '(0, 1, 0)' in line:
+                            # Look back to find the Workplane declaration
+                            found_fix = False
+                            for j in range(i-1, max(-1, i-5), -1):
+                                if j >= 0 and 'Workplane("XY")' in lines[j]:
+                                    # FOUND THE BUG: XY plane with Y-axis revolve
+                                    lines[j] = lines[j].replace('Workplane("XY")', 'Workplane("XZ")')
+                                    log.info("🩹 Fixed: Changed Workplane('XY') to Workplane('XZ') for Y-axis revolve")
+                                    found_fix = True
+                                    break
+
+                            if not found_fix:
+                                # Check if the Workplane is on the same line (method chaining)
+                                if 'Workplane("XY")' in line:
+                                    lines[i] = lines[i].replace('Workplane("XY")', 'Workplane("XZ")')
+                                    log.info("🩹 Fixed: Changed Workplane('XY') to Workplane('XZ') for Y-axis revolve (inline)")
 
                 fixed_code = '\n'.join(lines)
 
