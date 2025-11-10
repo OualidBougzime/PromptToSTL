@@ -54,6 +54,12 @@ Analyst Agent détecte le type
 
 ## Installation
 
+> 📚 **Guides Détaillés Disponibles** :
+> - **[INSTALL_OLLAMA.md](INSTALL_OLLAMA.md)** - Guide complet d'installation d'Ollama (recommandé pour débutants)
+> - **[verify_ollama.sh](verify_ollama.sh)** - Script de vérification automatique de l'installation
+> - **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Résolution des erreurs courantes
+> - **[TEST_LLM.md](TEST_LLM.md)** - Tests et cas d'usage
+
 ### Prérequis
 - Python 3.10+
 - Ollama
@@ -61,7 +67,9 @@ Analyst Agent détecte le type
 
 ### 1. Installer Ollama
 
-Téléchargez depuis [ollama.ai](https://ollama.ai)
+**Guide rapide** - Téléchargez depuis [ollama.ai](https://ollama.ai)
+
+**Guide complet** - Voir [INSTALL_OLLAMA.md](INSTALL_OLLAMA.md) pour instructions détaillées
 
 ### 2. Télécharger les Modèles
 
@@ -201,8 +209,14 @@ Ouvrez `http://localhost:3000` dans votre navigateur.
 
 ## Documentation
 
+### Architecture et Système
 - [COT_SYSTEM.md](COT_SYSTEM.md) - Documentation du système Chain-of-Thought
 - [MULTI_AGENT_SYSTEM.md](MULTI_AGENT_SYSTEM.md) - Architecture multi-agent détaillée
+
+### Installation et Configuration
+- [INSTALL_OLLAMA.md](INSTALL_OLLAMA.md) - Guide complet d'installation d'Ollama
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Résolution des problèmes courants
+- [TEST_LLM.md](TEST_LLM.md) - Tests et validation du système LLM
 
 ## Dépannage
 

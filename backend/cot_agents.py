@@ -101,24 +101,190 @@ class OllamaCoTClient:
 
     async def _fallback_generate(self, messages: List[Dict[str, str]]) -> str:
         """Fallback basique si Ollama non disponible"""
-        # Extraire le dernier message utilisateur
+        # Extraire le message système et utilisateur
+        system_msg = ""
         user_msg = ""
-        for msg in reversed(messages):
-            if msg["role"] == "user":
+
+        for msg in messages:
+            if msg["role"] == "system":
+                system_msg = msg["content"].lower()
+            elif msg["role"] == "user":
                 user_msg = msg["content"].lower()
-                break
 
-        # Réponses basiques selon le contexte
-        if "cube" in user_msg or "box" in user_msg:
-            return "Create a box with dimensions 50x50x50mm using workplane and box primitive."
+        # Détecter quel agent appelle (via le system prompt)
+        is_architect = "architect" in system_msg and "analyze" in system_msg
+        is_planner = "planner" in system_msg and "construction plan" in system_msg
+        is_synthesizer = "code generator" in system_msg or "generate" in system_msg
 
-        if "cylinder" in user_msg or "circle" in user_msg:
-            return "Create a cylinder with radius 25mm and height 50mm using circle and extrude."
+        # === ARCHITECT FALLBACK ===
+        if is_architect:
+            # Détecter la forme demandée dans le prompt
+            if "torus" in user_msg:
+                primitive = "torus"
+                operations = ["create_workplane", "create_torus"]
+                params = {"major_radius": 40, "minor_radius": 10}
+            elif "cylinder" in user_msg or "cylindre" in user_msg:
+                primitive = "cylinder"
+                operations = ["create_workplane", "create_cylinder"]
+                params = {"radius": 25, "height": 60}
+            elif "sphere" in user_msg or "sphère" in user_msg:
+                primitive = "sphere"
+                operations = ["create_workplane", "create_sphere"]
+                params = {"radius": 30}
+            elif "cone" in user_msg or "cône" in user_msg:
+                primitive = "cone"
+                operations = ["create_workplane", "create_cone"]
+                params = {"radius1": 40, "radius2": 10, "height": 80}
+            else:
+                # Box par défaut
+                primitive = "box"
+                operations = ["create_workplane", "create_box"]
+                params = {"width": 50, "height": 50, "depth": 50}
 
-        if "sphere" in user_msg:
-            return "Create a sphere using sphere primitive with radius 25mm."
+            # Retourner un JSON valide pour ArchitectAgent
+            import json
+            return json.dumps({
+                "description": f"Simple {primitive} from fallback",
+                "primitives_needed": [primitive],
+                "operations_sequence": operations,
+                "parameters": params,
+                "complexity": "simple",
+                "reasoning": f"Fallback mode - Ollama unavailable, detected {primitive}"
+            })
 
-        return "Create basic shape using CadQuery primitives: workplane, box, circle, extrude."
+        # === PLANNER FALLBACK ===
+        elif is_planner:
+            # Détecter la forme demandée dans le prompt
+            if "torus" in user_msg:
+                steps = [
+                    {"operation": "Workplane", "parameters": {"plane": "XZ"}, "description": "Create XZ plane for torus"},
+                    {"operation": "moveTo", "parameters": {"x": 40, "y": 0}, "description": "Position at major radius"},
+                    {"operation": "circle", "parameters": {"radius": 10}, "description": "Create minor circle"},
+                    {"operation": "revolve", "parameters": {"angle": 360, "axis": [0, 1, 0]}, "description": "Revolve around Y-axis"}
+                ]
+            elif "cylinder" in user_msg or "cylindre" in user_msg:
+                steps = [
+                    {"operation": "Workplane", "parameters": {"plane": "XY"}, "description": "Create base plane"},
+                    {"operation": "circle", "parameters": {"radius": 25}, "description": "Create circle"},
+                    {"operation": "extrude", "parameters": {"distance": 60}, "description": "Extrude to height"}
+                ]
+            elif "sphere" in user_msg or "sphère" in user_msg:
+                steps = [
+                    {"operation": "Workplane", "parameters": {"plane": "XY"}, "description": "Create base plane"},
+                    {"operation": "sphere", "parameters": {"radius": 30}, "description": "Create sphere"}
+                ]
+            elif "cone" in user_msg or "cône" in user_msg:
+                steps = [
+                    {"operation": "Workplane", "parameters": {"plane": "XY"}, "description": "Create base plane"},
+                    {"operation": "circle", "parameters": {"radius": 40}, "description": "Create base circle"},
+                    {"operation": "workplane", "parameters": {"offset": 80}, "description": "Create top plane"},
+                    {"operation": "circle", "parameters": {"radius": 10}, "description": "Create top circle"},
+                    {"operation": "loft", "parameters": {}, "description": "Loft between circles"}
+                ]
+            else:
+                # Box par défaut
+                steps = [
+                    {"operation": "Workplane", "parameters": {"plane": "XY"}, "description": "Create base plane"},
+                    {"operation": "box", "parameters": {"length": 50, "width": 50, "height": 50}, "description": "Create box"}
+                ]
+
+            # Retourner un JSON valide pour PlannerAgent
+            import json
+            return json.dumps({
+                "steps": steps,
+                "variables": {},
+                "constraints": [],
+                "estimated_complexity": len(steps)
+            })
+
+        # === SYNTHESIZER FALLBACK ===
+        elif is_synthesizer:
+            # Détecter la forme demandée dans le prompt
+            if "torus" in user_msg:
+                code = '''```python
+import cadquery as cq
+from pathlib import Path
+
+# Fallback: Torus
+profile = cq.Workplane("XZ").moveTo(40, 0).circle(10)
+result = profile.revolve(360, (0, 0, 0), (0, 1, 0))
+
+# Export to STL
+output_dir = Path(__file__).parent / "output"
+output_dir.mkdir(exist_ok=True)
+output_path = output_dir / "generated_cot_generated.stl"
+cq.exporters.export(result, str(output_path))
+print(f"✅ STL exported to: {output_path}")
+```'''
+            elif "cylinder" in user_msg or "cylindre" in user_msg:
+                code = '''```python
+import cadquery as cq
+from pathlib import Path
+
+# Fallback: Cylinder
+result = cq.Workplane("XY").circle(25).extrude(50)
+
+# Export to STL
+output_dir = Path(__file__).parent / "output"
+output_dir.mkdir(exist_ok=True)
+output_path = output_dir / "generated_cot_generated.stl"
+cq.exporters.export(result, str(output_path))
+print(f"✅ STL exported to: {output_path}")
+```'''
+            elif "sphere" in user_msg or "sphère" in user_msg:
+                code = '''```python
+import cadquery as cq
+from pathlib import Path
+
+# Fallback: Sphere
+result = cq.Workplane("XY").sphere(30)
+
+# Export to STL
+output_dir = Path(__file__).parent / "output"
+output_dir.mkdir(exist_ok=True)
+output_path = output_dir / "generated_cot_generated.stl"
+cq.exporters.export(result, str(output_path))
+print(f"✅ STL exported to: {output_path}")
+```'''
+            elif "cone" in user_msg or "cône" in user_msg:
+                code = '''```python
+import cadquery as cq
+from pathlib import Path
+
+# Fallback: Cone
+result = (cq.Workplane("XY")
+    .circle(40)
+    .workplane(offset=80)
+    .circle(10)
+    .loft())
+
+# Export to STL
+output_dir = Path(__file__).parent / "output"
+output_dir.mkdir(exist_ok=True)
+output_path = output_dir / "generated_cot_generated.stl"
+cq.exporters.export(result, str(output_path))
+print(f"✅ STL exported to: {output_path}")
+```'''
+            else:
+                # Cube par défaut
+                code = '''```python
+import cadquery as cq
+from pathlib import Path
+
+# Fallback: Box
+result = cq.Workplane("XY").box(50, 50, 50)
+
+# Export to STL
+output_dir = Path(__file__).parent / "output"
+output_dir.mkdir(exist_ok=True)
+output_path = output_dir / "generated_cot_generated.stl"
+cq.exporters.export(result, str(output_path))
+print(f"✅ STL exported to: {output_path}")
+```'''
+            return code
+
+        # Fallback générique (ne devrait pas arriver)
+        return "OK"
 
 
 class ArchitectAgent:
