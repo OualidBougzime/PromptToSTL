@@ -137,14 +137,16 @@ class ArchitectAgent:
 
         log.info(f"🏗️ Analyzing: {prompt[:100]}...")
 
-        system_prompt = """You are an expert CAD architect. Your role is to analyze user requests for 3D shapes and reason about how to construct them.
+        system_prompt = """You are an expert CAD architect specialized in 3D modeling with CadQuery.
 
-Think step by step:
-1. What is the user asking for?
-2. What are the basic geometric primitives needed? (box, cylinder, sphere, cone, torus, etc.)
-3. What operations are needed? (extrude, revolve, loft, sweep, fillet, chamfer, boolean ops, etc.)
-4. What's the construction sequence?
-5. What parameters are important?
+Your role: Analyze user requests and decompose them into geometric primitives and operations.
+
+ANALYSIS PROCESS (think step by step):
+1. IDENTIFY the shape: What exactly is the user asking for?
+2. PRIMITIVES: What basic shapes are needed? (box, cylinder, sphere, cone, torus, polygon, etc.)
+3. OPERATIONS: What transformations? (extrude, revolve, loft, sweep, fillet, chamfer, union, cut, etc.)
+4. SEQUENCE: In what order should operations be applied?
+5. PARAMETERS: Extract ALL numeric values from the prompt (dimensions, angles, counts, etc.)
 
 Output your analysis in this JSON format:
 {
@@ -305,28 +307,52 @@ class PlannerAgent:
 
         log.info(f"📐 Planning: {analysis.description}")
 
-        system_prompt = """You are a CAD construction planner. Given an architectural analysis, create a detailed step-by-step construction plan for CadQuery.
+        system_prompt = """You are a CAD construction planner specialized in CadQuery workflows.
 
-Each step should specify:
-- operation: The CadQuery operation to perform
-- parameters: The parameters for that operation
-- description: What this step does
+Your role: Transform architectural analysis into a precise, executable construction plan.
 
-CadQuery operations available:
-- Workplane(plane): Create a workplane (XY, XZ, YZ)
-- box(length, width, height): Create a box
-- circle(radius): Create a circle
-- rect(width, height): Create a rectangle
-- extrude(distance): Extrude 2D to 3D
-- revolve(angle): Revolve around axis
+PLANNING PRINCIPLES:
+1. START SIMPLE: Begin with basic workplane and primitives
+2. BUILD UP: Add complexity progressively (2D → 3D → modifications → patterns)
+3. BE SPECIFIC: Every parameter must have a concrete numeric value
+4. THINK 3D: Consider which plane (XY, XZ, YZ) is best for each operation
+
+CADQUERY OPERATIONS REFERENCE:
+
+WORKPLANES & PRIMITIVES:
+- Workplane(plane): Create workplane → plane: "XY"|"XZ"|"YZ"
+- box(length, width, height): Solid box
+- sphere(radius): Solid sphere
+- circle(radius): 2D circle (needs extrude/revolve for 3D)
+- rect(width, height): 2D rectangle
+- polygon(nSides, diameter): Regular polygon (hexagon: nSides=6)
+
+3D OPERATIONS:
+- extrude(distance): Extrude 2D → 3D
+- revolve(angleDegrees, axisStart, axisEnd): Revolve around axis (angle is POSITIONAL!)
+- loft(): Loft between multiple 2D profiles
+- sweep(path): Sweep profile along path
+
+MODIFICATIONS:
 - fillet(radius): Round edges
-- chamfer(distance): Chamfer edges
-- union(): Boolean union
-- cut(): Boolean subtraction
-- intersect(): Boolean intersection
-- translate(x, y, z): Move shape
-- rotate(axis, angle): Rotate shape
-- polarArray(radius, count): Circular pattern
+- chamfer(length): Chamfer edges
+- shell(thickness): Hollow out solid
+
+BOOLEAN OPERATIONS:
+- union(shape): Add shapes together
+- cut(shape): Subtract shape
+- intersect(shape): Keep only intersection
+- cutThruAll(): Cut through entire solid
+- cutBlind(depth): Cut to specific depth
+
+PATTERNS:
+- polarArray(radius, startAngle, angle, count): Circular pattern
+- rarray(xSpacing, ySpacing, xCount, yCount): Rectangular array
+
+SELECTION:
+- faces(selector): Select faces → ">Z" (top), "<Z" (bottom), "|Z" (vertical)
+- edges(selector): Select edges → "|Z" (parallel to Z), "#Z" (perpendicular)
+- vertices(): Select vertices
 
 Output JSON format:
 {
@@ -460,22 +486,32 @@ class CodeSynthesizerAgent:
 
         log.info(f"💻 Generating code: {analysis.description}")
 
-        # FAST-PATH : Pour formes simples, utiliser code validé (évite hallucinations LLM)
-        if (analysis.complexity == "simple" and
-            len(analysis.primitives_needed) == 1 and
-            analysis.primitives_needed[0] in ["cylinder", "sphere", "cone", "torus", "box"]):
+        # FAST-PATH DÉSACTIVÉ : Forcer l'utilisation des LLMs pour tout
+        # if (analysis.complexity == "simple" and
+        #     len(analysis.primitives_needed) == 1 and
+        #     analysis.primitives_needed[0] in ["cylinder", "sphere", "cone", "torus", "box"]):
+        #
+        #     primitive = analysis.primitives_needed[0]
+        #     params = analysis.parameters
+        #     log.info(f"🚀 Fast-path for simple shape: {primitive}")
+        #
+        #     # Générer directement le code validé
+        #     return self._generate_simple_shape_code(primitive, params)
 
-            primitive = analysis.primitives_needed[0]
-            params = analysis.parameters
-            log.info(f"🚀 Fast-path for simple shape: {primitive}")
+        log.info(f"🧠 Using full LLM pipeline (Fast-path disabled)")
 
-            # Générer directement le code validé
-            return self._generate_simple_shape_code(primitive, params)
+        system_prompt = """You are an expert CadQuery code generator with deep knowledge of the CadQuery Python library.
 
-        system_prompt = """You are an expert CadQuery code generator. Generate clean, working CadQuery code based on the construction plan.
+Your mission: Transform the construction plan into WORKING, EXECUTABLE CadQuery code.
+
+CODE QUALITY REQUIREMENTS:
+1. CORRECTNESS: Code must execute without errors
+2. COMPLETENESS: Must include imports, creation, and export
+3. CLARITY: Use descriptive variable names and comments for complex operations
+4. EFFICIENCY: Chain operations when possible using method chaining
 
 === CRITICAL: CADQUERY API REFERENCE ===
-Only use these validated methods to avoid errors:
+Only use these VALIDATED methods (hallucinating non-existent methods causes failures!):
 
 ✅ VALID METHODS:
 - box(length, width, height): Create a box
@@ -544,16 +580,40 @@ result = (result.faces(">Z")
     .extrude(2))
 ```
 
-CRITICAL RULES:
-1. Import: import cadquery as cq
-2. Must create 3D solid (extrude/revolve/loft) before cut/union
-3. revolve() angle is POSITIONAL: revolve(90) not revolve(angle=90)
-4. Use cutThruAll() not cut() for through holes
-5. Chain operations: .method1().method2().method3()
-6. End with: result = <final_shape>
-7. ⚠️ TORUS: Profile MUST be on XZ plane (not XY) for Y-axis revolve!
+CRITICAL SUCCESS RULES:
+1. ✅ ALWAYS import: import cadquery as cq
+2. ✅ Create 3D solid BEFORE cut/union (extrude/revolve/loft required first)
+3. ✅ revolve() angle is POSITIONAL: revolve(360) NOT revolve(angle=360)
+4. ✅ Use cutThruAll() not cut() for through-holes
+5. ✅ Chain operations fluently: .method1().method2().method3()
+6. ✅ Final shape MUST be assigned to: result = ...
+7. ✅ TORUS: Profile on XZ plane for Y-axis revolve (NOT XY!)
+8. ✅ Add export at the end (template provided below)
 
-Output ONLY the Python code, no explanations.
+COMMON ERROR PATTERNS TO AVOID:
+❌ NO: .torus(major, minor) → ✅ YES: Use revolve pattern
+❌ NO: .cone(r1, r2, h) → ✅ YES: Use circle+loft
+❌ NO: revolve(angle=360) → ✅ YES: revolve(360)
+❌ NO: .cut() with no argument → ✅ YES: .cutThruAll()
+❌ NO: loft(closed=True) → ✅ YES: loft() (no closed param)
+
+CODE STRUCTURE TEMPLATE:
+```python
+import cadquery as cq
+from pathlib import Path
+
+# Build the shape (your code here)
+result = cq.Workplane("XY")...
+
+# Export to STL
+output_dir = Path(__file__).parent / "output"
+output_dir.mkdir(exist_ok=True)
+output_path = output_dir / "generated_cot_generated.stl"
+cq.exporters.export(result, str(output_path))
+print(f"✅ STL exported to: {output_path}")
+```
+
+Output ONLY the complete Python code following the template above.
 """
 
         plan_text = json.dumps({
