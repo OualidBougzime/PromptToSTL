@@ -1419,7 +1419,7 @@ class CriticAgent:
     def __init__(self):
         log.info("🔍 CriticAgent initialized")
 
-    async def critique_code(self, code: str, prompt: str, context: WorkflowContext) -> AgentResult:
+    async def critique_code(self, code: str, prompt: str) -> AgentResult:
         """
         Analyse le code généré pour détecter les erreurs sémantiques AVANT exécution
         """
