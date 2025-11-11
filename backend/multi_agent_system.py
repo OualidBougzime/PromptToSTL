@@ -1210,6 +1210,26 @@ class SelfHealingAgent:
                         else:
                             log.warning(f"⚠️ Method .{bad_method}() detected but no automatic fix available")
 
+            # 3i: polarArray/rarray count parameter must be int, not float
+            if "'float' object cannot be interpreted as an integer" in error:
+                log.info("🩹 Attempting to fix: polarArray/rarray count must be int")
+
+                # Fix polarArray(..., count) where count is float
+                fixed_code = re.sub(
+                    r'\.polarArray\s*\(([^,]+),\s*([^,]+),\s*([^,]+),\s*(\d+\.\d+)\s*\)',
+                    lambda m: f'.polarArray({m.group(1)}, {m.group(2)}, {m.group(3)}, {int(float(m.group(4)))})',
+                    fixed_code
+                )
+
+                # Fix rarray(..., xCount, yCount) where counts are floats
+                fixed_code = re.sub(
+                    r'\.rarray\s*\(([^,]+),\s*([^,]+),\s*(\d+\.\d+),\s*(\d+\.\d+)\s*\)',
+                    lambda m: f'.rarray({m.group(1)}, {m.group(2)}, {int(float(m.group(3)))}, {int(float(m.group(4)))})',
+                    fixed_code
+                )
+
+                log.info("🩹 Fixed: Converted float counts to int in polarArray/rarray")
+
             # ========== SEMANTIC FIXES (NEW!) ==========
             # These fix logical/geometric errors, not just syntax errors
 
@@ -1396,8 +1416,9 @@ Provide the corrected code:
                 # Si pas de markdown, retourner la réponse brute
                 healed_code = response.strip()
 
-            # Nettoyer les caractères Unicode fullwidth (même fix que dans CodeSynthesizerAgent)
+            # Nettoyer les caractères Unicode problématiques (fullwidth + block drawing + autres)
             unicode_replacements = {
+                # Fullwidth characters (U+FF00 block)
                 '｜': '|',  # Fullwidth vertical line
                 '（': '(',  # Fullwidth left parenthesis
                 '）': ')',  # Fullwidth right parenthesis
@@ -1418,6 +1439,22 @@ Provide the corrected code:
                 '＞': '>',  # Fullwidth greater than
                 '＂': '"',  # Fullwidth quotation mark
                 '＇': "'",  # Fullwidth apostrophe
+                # Block drawing / box drawing characters
+                '▁': '_',   # Lower one eighth block (U+2581)
+                '▂': '_',   # Lower one quarter block (U+2582)
+                '▃': '_',   # Lower three eighths block (U+2583)
+                '▄': '_',   # Lower half block (U+2584)
+                '▅': '_',   # Lower five eighths block (U+2585)
+                '▆': '_',   # Lower three quarters block (U+2586)
+                '▇': '_',   # Lower seven eighths block (U+2587)
+                '█': '_',   # Full block (U+2588)
+                '▉': '_',   # Left seven eighths block (U+2589)
+                '▊': '_',   # Left three quarters block (U+258A)
+                '▋': '_',   # Left five eighths block (U+258B)
+                '▌': '_',   # Left half block (U+258C)
+                '▍': '_',   # Left three eighths block (U+258D)
+                '▎': '_',   # Left one quarter block (U+258E)
+                '▏': '_',   # Left one eighth block (U+258F)
             }
 
             for unicode_char, ascii_char in unicode_replacements.items():
