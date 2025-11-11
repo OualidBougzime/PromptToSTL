@@ -586,6 +586,13 @@ Original prompt: {prompt}
             elif "```" in response:
                 json_str = response.split("```")[1].split("```")[0].strip()
 
+            # Nettoyer les commentaires JavaScript (// et /* */)
+            json_str = re.sub(r'//.*$', '', json_str, flags=re.MULTILINE)  # Commentaires //
+            json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)  # Commentaires /* */
+
+            # Nettoyer les virgules finales avant } ou ]
+            json_str = re.sub(r',\s*([}\]])', r'\1', json_str)
+
             # Nettoyer les patterns JSON invalides
             json_str = re.sub(r':\s*value\b', ': 50', json_str, flags=re.IGNORECASE)
 
