@@ -1049,9 +1049,27 @@ Generate the complete working CadQuery code.
             if "import cadquery" not in code:
                 code = "import cadquery as cq\n\n" + code
 
-            # Vérifier que le code se termine par result
-            if "result" not in code:
-                code += "\n\n# Final result\nresult"
+            # Vérifier que le code définit bien la variable 'result'
+            # Chercher une assignation à 'result'
+            if "result =" not in code and "result=" not in code:
+                # Le code n'assigne pas à 'result' - trouver la dernière variable assignée
+                import re
+                # Chercher la dernière assignation de variable (ex: table = ..., final = ..., etc.)
+                last_assignment = None
+                for match in re.finditer(r'^(\w+)\s*=\s*', code, re.MULTILINE):
+                    var_name = match.group(1)
+                    # Ignorer les imports et variables internes
+                    if var_name not in ['output_dir', 'output_path', 'cq', 'Path']:
+                        last_assignment = var_name
+
+                if last_assignment:
+                    # Ajouter un alias 'result = last_var' avant l'export
+                    code += f"\n\n# Final result (alias for validation)\nresult = {last_assignment}\n"
+                    log.info(f"⚙️ Added result alias: result = {last_assignment}")
+                else:
+                    # Pas de variable trouvée - ajouter un placeholder
+                    log.warning("⚠️ No variable assignment found in generated code")
+                    code += "\n\n# Final result (placeholder - code may need fixing)\nresult = None\n"
 
             # Ajouter automatiquement l'export STL
             if "cq.exporters.export" not in code and ".exportStl" not in code:
