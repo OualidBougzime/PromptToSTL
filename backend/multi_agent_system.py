@@ -1139,6 +1139,16 @@ class SelfHealingAgent:
                 )
                 log.info("🩹 Fixed: Removed invalid 'closed' parameter from loft()")
 
+            # 3d2: sweep() with invalid 'sweepAngle' parameter
+            if "sweep() got an unexpected keyword argument 'sweepAngle'" in error or "unexpected keyword argument" in error:
+                # Remove sweepAngle parameter from sweep()
+                fixed_code = re.sub(
+                    r'\.sweep\s*\([^)]*sweepAngle\s*=\s*[^,)]+[,\s]*([^)]*)\)',
+                    r'.sweep(\1)',
+                    fixed_code
+                )
+                log.info("🩹 Fixed: Removed invalid 'sweepAngle' parameter from sweep()")
+
             # 3e: cut() without argument
             if "cut() missing 1 required positional argument" in error:
                 # Replace .cut() with .cutThruAll()
