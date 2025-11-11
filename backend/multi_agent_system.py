@@ -1391,10 +1391,39 @@ Provide the corrected code:
             # Extraire le code de la réponse
             code_match = re.search(r"```python\s*(.*?)\s*```", response, re.DOTALL)
             if code_match:
-                return code_match.group(1).strip()
+                healed_code = code_match.group(1).strip()
+            else:
+                # Si pas de markdown, retourner la réponse brute
+                healed_code = response.strip()
 
-            # Si pas de markdown, retourner la réponse brute
-            return response.strip()
+            # Nettoyer les caractères Unicode fullwidth (même fix que dans CodeSynthesizerAgent)
+            unicode_replacements = {
+                '｜': '|',  # Fullwidth vertical line
+                '（': '(',  # Fullwidth left parenthesis
+                '）': ')',  # Fullwidth right parenthesis
+                '［': '[',  # Fullwidth left bracket
+                '］': ']',  # Fullwidth right bracket
+                '｛': '{',  # Fullwidth left brace
+                '｝': '}',  # Fullwidth right brace
+                '，': ',',  # Fullwidth comma
+                '．': '.',  # Fullwidth period
+                '：': ':',  # Fullwidth colon
+                '；': ';',  # Fullwidth semicolon
+                '＝': '=',  # Fullwidth equals
+                '＋': '+',  # Fullwidth plus
+                '－': '-',  # Fullwidth minus
+                '＊': '*',  # Fullwidth asterisk
+                '／': '/',  # Fullwidth slash
+                '＜': '<',  # Fullwidth less than
+                '＞': '>',  # Fullwidth greater than
+                '＂': '"',  # Fullwidth quotation mark
+                '＇': "'",  # Fullwidth apostrophe
+            }
+
+            for unicode_char, ascii_char in unicode_replacements.items():
+                healed_code = healed_code.replace(unicode_char, ascii_char)
+
+            return healed_code
 
         except Exception as e:
             log.error(f"LLM healing failed: {e}")
