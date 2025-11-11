@@ -820,9 +820,31 @@ result = cq.Workplane("XY").circle(radius).extrude(60)
 result = cq.Workplane("XY").cylinder(20, 60)  # .cylinder() DOES NOT EXIST!
 ```
 
-### ARC (radius R, sweep angle A degrees):
+### ARC - 3D Arc (segment de tore / curved pipe):
 ```python
-# ✅ CORRECT - Use sagittaArc or threePointArc (NO sweepAngle parameter!):
+# ✅ CORRECT - Arc 3D = segment de tore (partial revolve) - USE THIS FOR "ARC"!
+import cadquery as cq
+
+# 3D Arc: curved pipe with radius R, sweep angle A degrees, pipe thickness T
+major_radius = 60  # Distance from center to arc centerline
+minor_radius = 5   # Pipe thickness (radius of circular cross-section)
+sweep_angle = 210  # Degrees of arc (< 360 for partial torus)
+
+# Create circular profile, position at major_radius, then partial revolve
+profile = cq.Workplane("XZ").moveTo(major_radius, 0).circle(minor_radius)
+result = profile.revolve(sweep_angle, (0, 0, 0), (0, 1, 0), clean=False)
+
+# ⚠️ IMPORTANT: Use clean=False to avoid BRep_API errors!
+# This creates a 3D curved pipe (partial torus) - the most common meaning of "arc"
+
+# ❌ WRONG - These create wrong shapes:
+result = cq.Workplane("XY").cylinder(5, 60)  # Creates straight cylinder, not curved arc!
+result = cq.Workplane("XY").circle(60).extrude(10)  # Creates flat disk, not curved pipe!
+```
+
+### ARC - 2D Arc (flat, extruded arc) - ONLY if explicitly requested:
+```python
+# Use sagittaArc or threePointArc for 2D arcs (NO sweepAngle parameter!):
 import cadquery as cq
 import math
 
@@ -860,10 +882,11 @@ result = cq.Workplane("XY").arc(60, 210)  # Wrong signature for arc()
 1. TORUS: ALWAYS use revolve pattern with XZ plane + moveTo + clean=False
 2. CONE: ALWAYS use loft (NOT extrude) with two circles of different radii
 3. CYLINDER: ALWAYS use circle + extrude (NOT loft with same radii)
-4. ARC: NEVER use sweepAngle parameter (doesn't exist!)
+4. ARC (3D): DEFAULT = segment de tore (partial revolve < 360°) - NOT cylinder or flat extrude!
 5. SPHERE: ONLY use .sphere() method (NOT revolve)
 6. polarArray/rarray count: MUST be integer, not float (use int(4) not 4.0)
 7. offset2D kind: MUST be string "arc" or "intersection", NOT a number
+8. sweep(): NEVER use sweepAngle parameter (doesn't exist!)
 
 Cone/Frustum:
 ```python
