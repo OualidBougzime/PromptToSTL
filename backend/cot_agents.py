@@ -805,6 +805,154 @@ result = (result.faces(">Z")
     .extrude(2))
 ```
 
+🚨 COMMON SEMANTIC ERRORS AND CORRECT PATTERNS 🚨
+===================================================
+These are REAL-WORLD examples of semantic errors - code that compiles but doesn't match user intent.
+
+❌ ERROR #1: TABLE WITH LEGS AT CENTER (WRONG!)
+Problem: Legs positioned near center (95,45) instead of corners
+```python
+# ❌ WRONG: Legs too close to center
+table_top = cq.Workplane("XY").box(200, 100, 5)
+leg1 = cq.Workplane("XY").moveTo(95, 45).circle(5).extrude(-50)  # TOO CLOSE TO CENTER!
+leg2 = cq.Workplane("XY").moveTo(105, 45).circle(5).extrude(-50)
+```
+
+✅ CORRECT: Position legs at CORNERS with proper spacing
+```python
+# ✅ CORRECT: Legs at corners
+import cadquery as cq
+table_width = 200
+table_depth = 100
+leg_inset = 10  # Distance from edge
+
+table_top = cq.Workplane("XY").box(table_width, table_depth, 5).translate((0, 0, 50))
+
+# Calculate corner positions: ±(width/2 - inset), ±(depth/2 - inset)
+x_offset = table_width / 2 - leg_inset  # = 90
+y_offset = table_depth / 2 - leg_inset  # = 40
+
+leg_positions = [
+    (x_offset, y_offset),      # Front right: (90, 40)
+    (-x_offset, y_offset),     # Front left: (-90, 40)
+    (x_offset, -y_offset),     # Back right: (90, -40)
+    (-x_offset, -y_offset)     # Back left: (-90, -40)
+]
+
+result = table_top
+for x, y in leg_positions:
+    leg = cq.Workplane("XY").center(x, y).circle(5).extrude(-50)
+    result = result.union(leg)
+```
+
+❌ ERROR #2: HOLLOW PIPE WITHOUT cut() (SOLID INSTEAD!)
+Problem: Prompt says "hollow pipe" but code has no cut/shell operation
+```python
+# ❌ WRONG: Creates SOLID cylinder, not hollow pipe!
+result = cq.Workplane("XY").circle(20).extrude(100)  # SOLID!
+```
+
+✅ CORRECT: Use cut() or shell() to make it hollow
+```python
+# ✅ CORRECT: Hollow pipe using cut()
+import cadquery as cq
+outer_radius = 20
+inner_radius = 15
+height = 100
+
+outer = cq.Workplane("XY").circle(outer_radius).extrude(height)
+inner = cq.Workplane("XY").circle(inner_radius).extrude(height)
+result = outer.cut(inner)  # Subtract inner to create hollow
+```
+
+OR using shell() (alternative method):
+```python
+# ✅ CORRECT: Hollow pipe using shell()
+result = (cq.Workplane("XY")
+    .circle(20)
+    .extrude(100)
+    .faces(">Z")
+    .shell(-5))  # Wall thickness = 5mm
+```
+
+❌ ERROR #3: VASE WITH loft() THEN revolve() (IMPOSSIBLE!)
+Problem: loft() creates 3D solid - cannot revolve a solid
+```python
+# ❌ WRONG: Can't revolve after loft (loft creates 3D solid!)
+base = cq.Workplane("XY").circle(30)
+top = cq.Workplane("XY", offset=100).circle(20)
+vase = base.loft()  # Creates 3D solid
+result = vase.revolve(360)  # ❌ CAN'T REVOLVE A SOLID!
+```
+
+✅ CORRECT: Use ONLY revolve() with varying radius profile
+```python
+# ✅ CORRECT: Vase using revolve with profile
+import cadquery as cq
+
+# Create profile path for vase shape on XZ plane
+profile = (cq.Workplane("XZ")
+    .moveTo(30, 0)      # Bottom outer radius
+    .lineTo(25, 50)     # Taper inward
+    .lineTo(20, 100)    # Top radius
+    .lineTo(17, 100)    # Inner wall top
+    .lineTo(27, 0)      # Inner wall bottom
+    .close())           # Close the profile
+
+result = profile.revolve(360, (0, 0, 0), (0, 1, 0), clean=False)
+```
+
+OR for simple tapered vase:
+```python
+# ✅ CORRECT: Simple tapered vase with shell()
+outer = (cq.Workplane("XY")
+    .circle(30)
+    .workplane(offset=100)
+    .circle(20)
+    .loft())
+
+result = outer.faces(">Z").shell(-3)  # 3mm wall thickness
+```
+
+❌ ERROR #4: BOWL WITHOUT HOLLOW (SOLID HEMISPHERE!)
+Problem: Bowl should be hollow but code creates solid
+```python
+# ❌ WRONG: Solid hemisphere, not a bowl!
+result = cq.Workplane("XY").sphere(50).faces(">Z").workplane().split(keepTop=True)
+```
+
+✅ CORRECT: Bowl with shell() or cut()
+```python
+# ✅ CORRECT: Hollow bowl using shell()
+import cadquery as cq
+radius = 50
+wall_thickness = 3
+
+sphere = cq.Workplane("XY").sphere(radius)
+# Cut away top half to create bowl shape
+bowl = sphere.faces("<Z").workplane(-radius).split(keepBottom=True)
+# Make it hollow
+result = bowl.faces(">Z").shell(wall_thickness)
+```
+
+OR using two spheres:
+```python
+# ✅ CORRECT: Hollow bowl using cut()
+outer_sphere = cq.Workplane("XY").sphere(50)
+inner_sphere = cq.Workplane("XY").sphere(47)  # 3mm wall
+outer_half = outer_sphere.faces("<Z").workplane().split(keepBottom=True)
+inner_half = inner_sphere.faces("<Z").workplane().split(keepBottom=True)
+result = outer_half.cut(inner_half)
+```
+
+KEY LESSONS:
+1. For furniture (tables, chairs): Position elements at EDGES/CORNERS, not center
+   - Calculate: ±(total_width/2 - inset_from_edge)
+2. For hollow objects (pipes, tubes, containers): ALWAYS use .cut() or .shell()
+3. For vases/bottles: Use revolve() with CLOSED profile, NOT loft()+revolve()
+4. For bowls/cups: Create outer shape then use .shell() or subtract inner shape
+5. Verify coordinates make geometric sense (e.g., legs at ±90 not ±5 for 200mm table)
+
 CRITICAL SUCCESS RULES:
 1. ✅ ALWAYS import: import cadquery as cq
 2. ✅ Create 3D solid BEFORE cut/union (extrude/revolve/loft required first)

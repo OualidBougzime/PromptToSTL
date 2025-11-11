@@ -159,12 +159,13 @@ class OrchestratorAgent:
         self.generator = generator_agent
         self.validator = validator_agent
 
-        # Agents multi-agent (6)
+        # Agents multi-agent (7 - added CriticAgent)
         self.design_expert = DesignExpertAgent()
         self.constraint_validator = ConstraintValidatorAgent()
         self.syntax_validator = SyntaxValidatorAgent()
         self.error_handler = ErrorHandlerAgent()
         self.self_healing = SelfHealingAgent()
+        self.critic = CriticAgent()  # 🔍 NEW: Semantic validation BEFORE execution
 
         # Agents Chain-of-Thought (3) - Pour formes universelles
         self.architect = ArchitectAgent()
@@ -177,7 +178,7 @@ class OrchestratorAgent:
             "honeycomb", "gripper", "facade_pyramid", "facade_parametric"
         }
 
-        log.info("🎯 OrchestratorAgent initialized (12 agents: 3 base + 6 multi-agent + 3 CoT)")
+        log.info("🎯 OrchestratorAgent initialized (13 agents: 3 base + 7 multi-agent + 3 CoT)")
 
     def _should_use_cot(self, analysis: Dict[str, Any]) -> bool:
         """
@@ -355,6 +356,53 @@ class OrchestratorAgent:
                     "app_type": detected_type,
                     "progress": 70
                 })
+
+            # PHASE 5.5: 🔍 Critic Agent - Validation sémantique AVANT exécution (NEW!)
+            if progress_callback:
+                await progress_callback("status", {"message": "🔍 Critic validating code logic...", "progress": 73})
+
+            critic_result = await self._execute_with_retry(
+                self.critic.critique_code,
+                context,
+                "Semantic Validation",
+                code,
+                prompt
+            )
+
+            # Si le Critic détecte des problèmes sémantiques, tenter de corriger AVANT exécution
+            if critic_result.status != AgentStatus.SUCCESS:
+                log.warning("🔍 Critic detected semantic issues - attempting to heal BEFORE execution")
+
+                if progress_callback:
+                    await progress_callback("status", {"message": "🩹 Healing semantic issues...", "progress": 75})
+
+                # Passer les erreurs sémantiques détectées au SelfHealingAgent
+                heal_result = await self.self_healing.heal_code(
+                    code,
+                    critic_result.errors,
+                    context
+                )
+
+                if heal_result.status == AgentStatus.SUCCESS:
+                    code = heal_result.data
+                    context.generated_code = code
+                    log.info("✅ Code healed successfully after Critic feedback")
+
+                    # Re-vérifier avec Critic après healing
+                    critic_result = await self._execute_with_retry(
+                        self.critic.critique_code,
+                        context,
+                        "Semantic Validation (Retry)",
+                        code,
+                        prompt
+                    )
+
+                    if critic_result.status == AgentStatus.SUCCESS:
+                        log.info("✅ Critic: Code passed semantic validation after healing")
+                    else:
+                        log.warning("⚠️ Critic: Still has semantic issues after healing, proceeding with caution")
+                else:
+                    log.warning("⚠️ Self-healing failed for semantic issues, proceeding with original code")
 
             # PHASE 6: Validation et exécution (Agent existant)
             if progress_callback:
@@ -1162,6 +1210,138 @@ class SelfHealingAgent:
                         else:
                             log.warning(f"⚠️ Method .{bad_method}() detected but no automatic fix available")
 
+            # ========== SEMANTIC FIXES (NEW!) ==========
+            # These fix logical/geometric errors, not just syntax errors
+
+            # Semantic Fix 1: Table legs positioned at center instead of corners
+            if "SEMANTIC ERROR: Table legs appear to be positioned near CENTER" in error:
+                log.info("🩹 Attempting semantic fix: Table legs at center → corners")
+
+                # Extract expected coordinates from error message
+                import re
+                expected_match = re.search(r'expected ~±([\d.]+), ±([\d.]+)', error)
+                if expected_match:
+                    expected_x = float(expected_match.group(1))
+                    expected_y = float(expected_match.group(2))
+
+                    # Find and replace small coordinates with corner positions
+                    lines = fixed_code.split('\n')
+                    for i, line in enumerate(lines):
+                        # Find .moveTo() or .center() with small coordinates
+                        moveto_match = re.search(r'\.(?:moveTo|center)\s*\(\s*([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)\s*\)', line)
+                        if moveto_match:
+                            x = abs(float(moveto_match.group(1)))
+                            y = abs(float(moveto_match.group(2)))
+
+                            # If coordinates are suspiciously small (< 30% of expected), fix them
+                            if x < expected_x * 0.5 or y < expected_y * 0.5:
+                                # Replace with proper corner positions
+                                old_x = moveto_match.group(1)
+                                old_y = moveto_match.group(2)
+
+                                # Determine which corner based on signs
+                                sign_x = '+' if '-' not in old_x else '-'
+                                sign_y = '+' if '-' not in old_y else '-'
+
+                                new_x = f"{sign_x}{expected_x:.0f}" if sign_x == '-' else f"{expected_x:.0f}"
+                                new_y = f"{sign_y}{expected_y:.0f}" if sign_y == '-' else f"{expected_y:.0f}"
+
+                                lines[i] = line.replace(f'({old_x}, {old_y})', f'({new_x}, {new_y})')
+                                log.info(f"🩹 Fixed leg position: ({old_x}, {old_y}) → ({new_x}, {new_y})")
+
+                    fixed_code = '\n'.join(lines)
+
+            # Semantic Fix 2: Hollow object missing cut() or shell()
+            if "SEMANTIC ERROR: Prompt mentions hollow/pipe/tube but code has no" in error:
+                log.info("🩹 Attempting semantic fix: Add cut() for hollow object")
+
+                # Strategy: Find the main shape creation and add inner cut
+                lines = fixed_code.split('\n')
+
+                # Find where result is assigned
+                for i, line in enumerate(lines):
+                    # Look for result = cq.Workplane...circle(...).extrude(...)
+                    if 'result' in line and '.circle(' in line and '.extrude(' in line:
+                        # Extract radius and height
+                        radius_match = re.search(r'\.circle\s*\(\s*(\d+(?:\.\d+)?)\s*\)', line)
+                        extrude_match = re.search(r'\.extrude\s*\(\s*([+-]?\d+(?:\.\d+)?)\s*\)', line)
+
+                        if radius_match and extrude_match:
+                            outer_radius = float(radius_match.group(1))
+                            height = float(extrude_match.group(2))
+                            inner_radius = outer_radius * 0.75  # 25% wall thickness
+
+                            # Rename outer cylinder
+                            lines[i] = line.replace('result =', 'outer =')
+
+                            # Add inner cylinder and cut after this line
+                            indent = len(line) - len(line.lstrip())
+                            indent_str = ' ' * indent
+
+                            # Insert inner and cut operations
+                            lines.insert(i + 1, f'{indent_str}inner = cq.Workplane("XY").circle({inner_radius}).extrude({height})')
+                            lines.insert(i + 2, f'{indent_str}result = outer.cut(inner)  # Make hollow')
+
+                            log.info(f"🩹 Added cut() to make hollow: outer_r={outer_radius}, inner_r={inner_radius}")
+                            break
+
+                fixed_code = '\n'.join(lines)
+
+            # Semantic Fix 3: loft() followed by revolve() - IMPOSSIBLE
+            if "SEMANTIC ERROR: Code uses .loft() then .revolve()" in error:
+                log.info("🩹 Attempting semantic fix: Remove loft(), keep revolve()")
+
+                # Strategy: Remove the loft() operation and its setup
+                lines = fixed_code.split('\n')
+                new_lines = []
+                skip_until_revolve = False
+
+                for line in lines:
+                    if '.loft()' in line:
+                        # Mark to skip lines until we hit revolve
+                        skip_until_revolve = True
+                        log.info("🩹 Removed .loft() operation (conflicts with revolve)")
+                        continue
+
+                    if skip_until_revolve:
+                        # Skip lines until we find revolve
+                        if '.revolve(' in line:
+                            skip_until_revolve = False
+                            new_lines.append(line)
+                        # Skip intermediate workplane offsets for loft
+                        elif '.workplane(offset=' in line or '.circle(' in line:
+                            continue
+                        else:
+                            new_lines.append(line)
+                    else:
+                        new_lines.append(line)
+
+                fixed_code = '\n'.join(new_lines)
+
+            # Semantic Fix 4: Bowl/vase without shell() or cut()
+            if "hollow" in error.lower() and ("bowl" in error.lower() or "vase" in error.lower()):
+                log.info("🩹 Attempting semantic fix: Add shell() for hollow bowl/vase")
+
+                # Find result assignment and add .shell() if missing
+                if '.shell(' not in fixed_code:
+                    lines = fixed_code.split('\n')
+                    for i, line in enumerate(lines):
+                        if 'result =' in line and ('.loft()' in line or '.sphere(' in line):
+                            # Add shell operation
+                            lines[i] = line.rstrip()
+                            if not lines[i].endswith(')'):
+                                lines[i] += ')'
+                            # Check if line ends with a method call
+                            if lines[i].rstrip().endswith(')'):
+                                # Add shell to the chain
+                                indent_match = re.match(r'(\s*)', lines[i])
+                                next_indent = indent_match.group(1) + '    ' if indent_match else '    '
+                                lines.insert(i + 1, f'{next_indent}.faces(">Z").shell(-3))  # 3mm wall thickness')
+                                log.info("🩹 Added .shell() for hollow bowl/vase")
+                                break
+
+                    fixed_code = '\n'.join(lines)
+
         return fixed_code
 
     async def _llm_heal_code(self, code: str, errors: List[str]) -> str:
@@ -1221,6 +1401,221 @@ Provide the corrected code:
             return code
 
 
+# ========== AGENT 7: CRITIC ==========
+
+class CriticAgent:
+    """
+    🔍 CRITIC AGENT
+    Rôle: Valider la logique et la sémantique du code AVANT exécution
+    Priorité: HAUTE
+
+    Détecte les erreurs sémantiques que SyntaxValidator ne peut pas voir :
+    - Pieds de table mal positionnés (centre vs coins)
+    - Objets censés être creux mais sans cut()/shell()
+    - Conflits de workflow (loft() + revolve())
+    - Dimensions incohérentes ou espacements incorrects
+    """
+
+    def __init__(self):
+        log.info("🔍 CriticAgent initialized")
+
+    async def critique_code(self, code: str, prompt: str, context: WorkflowContext) -> AgentResult:
+        """
+        Analyse le code généré pour détecter les erreurs sémantiques AVANT exécution
+        """
+
+        log.info(f"🔍 Critiquing generated code for prompt: '{prompt[:80]}...'")
+
+        issues = []
+        warnings = []
+
+        # Analyse 1 : Tables avec pieds mal positionnés
+        if any(keyword in prompt.lower() for keyword in ["table", "desk", "stand"]):
+            leg_issue = self._check_table_legs(code, prompt)
+            if leg_issue:
+                issues.append(leg_issue)
+
+        # Analyse 2 : Objets creux
+        if any(keyword in prompt.lower() for keyword in ["hollow", "creux", "pipe", "tube", "vase", "bowl", "cup", "container"]):
+            hollow_issue = self._check_hollow_object(code, prompt)
+            if hollow_issue:
+                issues.append(hollow_issue)
+
+        # Analyse 3 : Conflits de workflow
+        workflow_issue = self._check_workflow_conflicts(code)
+        if workflow_issue:
+            issues.append(workflow_issue)
+
+        # Analyse 4 : Espacement et dimensions
+        spacing_issue = self._check_spacing_and_dimensions(code, prompt)
+        if spacing_issue:
+            warnings.append(spacing_issue)
+
+        # Analyse 5 : Axes de révolution
+        revolve_issue = self._check_revolve_axis(code)
+        if revolve_issue:
+            warnings.append(revolve_issue)
+
+        if issues:
+            log.warning(f"🔍 Critic found {len(issues)} semantic issue(s)")
+            for issue in issues:
+                log.warning(f"   ⚠️ {issue}")
+
+            return AgentResult(
+                status=AgentStatus.FAILED,
+                errors=issues,
+                data={
+                    "issues": issues,
+                    "warnings": warnings,
+                    "needs_healing": True
+                }
+            )
+
+        if warnings:
+            log.info(f"🔍 Critic found {len(warnings)} warning(s) (non-blocking)")
+            for warning in warnings:
+                log.info(f"   💡 {warning}")
+
+        log.info("✅ Critic: Code looks semantically correct")
+        return AgentResult(
+            status=AgentStatus.SUCCESS,
+            data={
+                "issues": [],
+                "warnings": warnings,
+                "needs_healing": False
+            }
+        )
+
+    def _check_table_legs(self, code: str, prompt: str) -> Optional[str]:
+        """
+        Vérifie que les pieds d'une table sont positionnés aux coins, pas au centre
+        """
+        # Extraire les dimensions de la table du prompt
+        import re
+
+        # Chercher mentions de dimensions
+        width_match = re.search(r'(\d+)\s*(?:mm|cm)?\s*(?:wide|width|large)', prompt.lower())
+        depth_match = re.search(r'(\d+)\s*(?:mm|cm)?\s*(?:deep|depth|profond)', prompt.lower())
+
+        if not width_match or not depth_match:
+            # Si pas de dimensions explicites, on ne peut pas valider
+            return None
+
+        width = float(width_match.group(1))
+        depth = float(depth_match.group(1))
+
+        # Chercher les coordonnées des pieds dans le code
+        # Pattern : .moveTo(x, y) ou .center(x, y) ou workplane offset
+        leg_positions = re.findall(r'\.(?:moveTo|center)\s*\(\s*([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)\s*\)', code)
+
+        if len(leg_positions) < 2:
+            return None  # Pas assez de positions détectées
+
+        # Calculer les positions attendues aux coins (approximatif)
+        expected_x = width / 2 - 10  # 10mm de marge du bord
+        expected_y = depth / 2 - 10
+
+        # Vérifier si les pieds sont trop proches du centre
+        for x_str, y_str in leg_positions:
+            x = abs(float(x_str))
+            y = abs(float(y_str))
+
+            # Si les coordonnées sont trop petites (< 30% des dimensions), c'est suspect
+            if x < width * 0.3 or y < depth * 0.3:
+                return (f"SEMANTIC ERROR: Table legs appear to be positioned near CENTER "
+                       f"(x={x_str}, y={y_str}), but should be at CORNERS "
+                       f"(expected ~±{expected_x:.0f}, ±{expected_y:.0f})")
+
+        return None
+
+    def _check_hollow_object(self, code: str, prompt: str) -> Optional[str]:
+        """
+        Vérifie qu'un objet creux utilise bien cut() ou shell()
+        """
+        # Ignorer si le code contient déjà cut, shell, ou cutBlind
+        if any(op in code for op in ['.cut(', '.shell(', '.cutBlind(', '.cutThruAll(']):
+            return None
+
+        # Chercher des indices que l'objet devrait être creux
+        hollow_keywords = ['hollow', 'creux', 'pipe', 'tube', 'container', 'cup', 'bowl']
+        if any(kw in prompt.lower() for kw in hollow_keywords):
+            return (f"SEMANTIC ERROR: Prompt mentions hollow/pipe/tube but code has no "
+                   f".cut(), .shell(), or .cutBlind() operation. Object will be SOLID.")
+
+        return None
+
+    def _check_workflow_conflicts(self, code: str) -> Optional[str]:
+        """
+        Détecte les conflits de workflow CadQuery (ex: loft() puis revolve())
+        """
+        # Conflit 1 : loft() suivi de revolve()
+        if '.loft()' in code and '.revolve(' in code:
+            loft_index = code.find('.loft()')
+            revolve_index = code.find('.revolve(')
+
+            if loft_index < revolve_index:
+                return (f"SEMANTIC ERROR: Code uses .loft() then .revolve(). "
+                       f"loft() creates a 3D solid - you CANNOT revolve a solid. "
+                       f"Choose ONE: either loft between profiles OR revolve a 2D profile.")
+
+        # Conflit 2 : extrude() suivi de revolve()
+        if '.extrude(' in code and '.revolve(' in code:
+            extrude_index = code.find('.extrude(')
+            revolve_index = code.find('.revolve(')
+
+            if extrude_index < revolve_index:
+                return (f"SEMANTIC ERROR: Code uses .extrude() then .revolve(). "
+                       f"extrude() creates a 3D solid - you CANNOT revolve a solid. "
+                       f"Choose ONE: either extrude OR revolve.")
+
+        return None
+
+    def _check_spacing_and_dimensions(self, code: str, prompt: str) -> Optional[str]:
+        """
+        Vérifie que les espacements et dimensions sont cohérents
+        """
+        import re
+
+        # Chercher les valeurs numériques dans le code
+        numbers = re.findall(r'\b(\d+(?:\.\d+)?)\b', code)
+        if not numbers:
+            return None
+
+        # Convertir en float
+        values = [float(n) for n in numbers]
+
+        # Détecter les valeurs suspicieusement petites pour un espacement
+        if '.rarray(' in code or '.polarArray(' in code:
+            # Si on utilise des arrays, vérifier que les espacements ne sont pas trop petits
+            small_values = [v for v in values if 0.1 < v < 5]
+            if small_values:
+                return (f"WARNING: Detected small spacing values {small_values} in array pattern. "
+                       f"This might cause overlapping elements. Verify spacing is adequate.")
+
+        return None
+
+    def _check_revolve_axis(self, code: str) -> Optional[str]:
+        """
+        Vérifie la cohérence entre workplane et axe de révolution
+        """
+        import re
+
+        # Extraire les revolve avec leurs axes
+        revolve_matches = re.findall(r'\.revolve\([^)]*\(0,\s*(\d),\s*0\)[^)]*\(0,\s*(\d),\s*0\)[^)]*\)', code)
+
+        for match in revolve_matches:
+            axis_start = match[0]
+            axis_end = match[1]
+
+            # Pour révolution autour de Y (0,1,0) -> (0,1,0), devrait être sur XZ
+            if axis_start == '1' and axis_end == '1':
+                if 'Workplane("XY")' in code:
+                    return (f"WARNING: Y-axis revolve detected with XY workplane. "
+                           f"Consider using XZ workplane for Y-axis revolve to avoid issues.")
+
+        return None
+
+
 # ========== EXPORTS ==========
 
 __all__ = [
@@ -1230,6 +1625,7 @@ __all__ = [
     "SyntaxValidatorAgent",
     "ErrorHandlerAgent",
     "SelfHealingAgent",
+    "CriticAgent",
     "AgentStatus",
     "AgentResult",
     "WorkflowContext"
