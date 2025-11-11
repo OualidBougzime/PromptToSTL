@@ -1034,7 +1034,7 @@ class SelfHealingAgent:
             error_lower = error.lower()
 
             # Fix 1: Missing imports
-            if "nameError" in error or "not defined" in error_lower:
+            if "NameError" in error or "not defined" in error_lower:
                 if "np" in error and "import numpy as np" not in fixed_code:
                     fixed_code = "import numpy as np\n" + fixed_code
 
@@ -1043,6 +1043,24 @@ class SelfHealingAgent:
 
                 if "struct" in error and "import struct" not in fixed_code:
                     fixed_code = "import struct\n" + fixed_code
+
+            # Fix 1b: Hallucinated imports (modules that don't exist)
+            if "ModuleNotFoundError" in error or "No module named" in error:
+                # Remove hallucinated imports
+                hallucinated_modules = ['Helpers', 'cadquery.helpers', 'cq_helpers', 'utils', 'cad_utils']
+
+                for module in hallucinated_modules:
+                    if f"No module named '{module}'" in error or f'No module named "{module}"' in error:
+                        # Remove the import line
+                        lines = fixed_code.split('\n')
+                        fixed_lines = []
+                        for line in lines:
+                            # Skip lines importing the hallucinated module
+                            if f'import {module}' in line or f'from {module}' in line:
+                                log.info(f"🩹 Removed hallucinated import: {line.strip()}")
+                                continue
+                            fixed_lines.append(line)
+                        fixed_code = '\n'.join(fixed_lines)
 
             # Fix 2: Indentation errors (basique)
             if "indentation" in error_lower:
@@ -1230,8 +1248,102 @@ class SelfHealingAgent:
 
                 log.info("🩹 Fixed: Converted float counts to int in polarArray/rarray")
 
+            # 3j: offset2D KeyError - kind parameter must be string, not float
+            if "KeyError" in error and "offset2D" in code:
+                log.info("🩹 Attempting to fix: offset2D kind must be string")
+
+                # Fix offset2D(distance, kind) where kind is a float instead of "arc"/"intersection"
+                # The LLM sometimes passes a number instead of the kind string
+                fixed_code = re.sub(
+                    r'\.offset2D\s*\(([^,]+),\s*(\d+(?:\.\d+)?)\s*\)',
+                    r'.offset2D(\1, "arc")',  # Default to "arc" mode
+                    fixed_code
+                )
+
+                log.info("🩹 Fixed: Changed offset2D(dist, <number>) to offset2D(dist, \"arc\")")
+
             # ========== SEMANTIC FIXES (NEW!) ==========
             # These fix logical/geometric errors, not just syntax errors
+
+            # Semantic Fix 0: Wrong shape generated (torus→sphere, cone→cylinder)
+            if "SEMANTIC ERROR: Prompt asks for TORUS but code uses" in error:
+                log.info("🩹 Attempting semantic fix: Replace sphere with torus revolve pattern")
+
+                # Extract parameters from context if possible (fallback to defaults)
+                major_r = 50  # default major radius
+                minor_r = 10  # default minor radius
+
+                # Try to extract from prompt or code
+                import re
+                major_match = re.search(r'major[_\s]*radius[:\s]*(\d+)', error.lower())
+                minor_match = re.search(r'minor[_\s]*radius[:\s]*(\d+)', error.lower())
+                if major_match:
+                    major_r = int(major_match.group(1))
+                if minor_match:
+                    minor_r = int(minor_match.group(1))
+
+                # Replace sphere code with torus code
+                lines = fixed_code.split('\n')
+                new_lines = []
+                for line in lines:
+                    if '.sphere(' in line:
+                        # Extract variable name if any
+                        var_match = re.match(r'(\s*)(\w+)\s*=\s*.*\.sphere\s*\(', line)
+                        if var_match:
+                            indent = var_match.group(1)
+                            var_name = var_match.group(2)
+                            new_lines.append(f'{indent}# Torus via revolve (fixed by SelfHealingAgent)')
+                            new_lines.append(f'{indent}profile = cq.Workplane("XZ").moveTo({major_r}, 0).circle({minor_r})')
+                            new_lines.append(f'{indent}{var_name} = profile.revolve(360, (0, 0, 0), (0, 1, 0), clean=False)')
+                            log.info(f"🩹 Replaced .sphere() with torus revolve pattern (major={major_r}, minor={minor_r})")
+                        else:
+                            new_lines.append(line)
+                    else:
+                        new_lines.append(line)
+                fixed_code = '\n'.join(new_lines)
+
+            elif "SEMANTIC ERROR: Prompt asks for CONE but code uses" in error:
+                log.info("🩹 Attempting semantic fix: Replace cylinder with cone loft pattern")
+
+                # Extract parameters
+                base_radius = 25  # default
+                height = 50  # default
+
+                import re
+                base_match = re.search(r'(?:base|bottom)[_\s]*(?:diameter|radius)[:\s]*(\d+)', error.lower())
+                height_match = re.search(r'height[:\s]*(\d+)', error.lower())
+                if base_match:
+                    base_radius = int(base_match.group(1)) / 2  # diameter to radius
+                if height_match:
+                    height = int(height_match.group(1))
+
+                # Replace simple extrude with loft pattern
+                lines = fixed_code.split('\n')
+                new_lines = []
+                skip_next = False
+                for i, line in enumerate(lines):
+                    if skip_next:
+                        skip_next = False
+                        continue
+
+                    if '.circle(' in line and '.extrude(' in line and 'loft' not in fixed_code:
+                        # This is a cylinder - replace with cone
+                        var_match = re.match(r'(\s*)(\w+)\s*=\s*', line)
+                        if var_match:
+                            indent = var_match.group(1)
+                            var_name = var_match.group(2)
+                            new_lines.append(f'{indent}# Cone via loft (fixed by SelfHealingAgent)')
+                            new_lines.append(f'{indent}{var_name} = (cq.Workplane("XY")')
+                            new_lines.append(f'{indent}    .circle({base_radius})')
+                            new_lines.append(f'{indent}    .workplane(offset={height})')
+                            new_lines.append(f'{indent}    .circle(0.1)')  # Small top radius for cone point
+                            new_lines.append(f'{indent}    .loft())')
+                            log.info(f"🩹 Replaced .extrude() with cone loft pattern (base_r={base_radius}, h={height})")
+                        else:
+                            new_lines.append(line)
+                    else:
+                        new_lines.append(line)
+                fixed_code = '\n'.join(new_lines)
 
             # Semantic Fix 1: Table legs positioned at center instead of corners
             if "SEMANTIC ERROR: Table legs appear to be positioned near CENTER" in error:
@@ -1495,6 +1607,11 @@ class CriticAgent:
         issues = []
         warnings = []
 
+        # Analyse 0 : Forme générée correspond-elle au prompt ? (NOUVEAU - CRITIQUE!)
+        shape_mismatch = self._check_shape_mismatch(code, prompt)
+        if shape_mismatch:
+            issues.append(shape_mismatch)
+
         # Analyse 1 : Tables avec pieds mal positionnés
         if any(keyword in prompt.lower() for keyword in ["table", "desk", "stand"]):
             leg_issue = self._check_table_legs(code, prompt)
@@ -1551,6 +1668,75 @@ class CriticAgent:
                 "needs_healing": False
             }
         )
+
+    def _check_shape_mismatch(self, code: str, prompt: str) -> Optional[str]:
+        """
+        Vérifie que la forme générée correspond à ce qui est demandé dans le prompt.
+
+        Exemple critique: Prompt demande "torus" mais code génère sphere()
+        """
+        prompt_lower = prompt.lower()
+
+        # Définir les correspondances forme → méthodes requises
+        shape_requirements = {
+            'torus': {
+                'required': ['revolve', 'moveTo'],  # Torus = profile.moveTo().circle().revolve()
+                'forbidden': ['.sphere(', '.box(', '.cylinder('],
+                'error_msg': 'SEMANTIC ERROR: Prompt asks for TORUS but code uses {method}. Use revolve pattern: profile = cq.Workplane("XZ").moveTo(major_r, 0).circle(minor_r); result = profile.revolve(360, (0,0,0), (0,1,0), clean=False)'
+            },
+            'cone': {
+                'required': ['loft', 'circle', 'workplane'],  # Cone = circle + workplane + circle + loft
+                'forbidden': ['.sphere(', '.box('],
+                'allow_cylinder': False,  # Cone ne doit PAS être un simple cylinder
+                'error_msg': 'SEMANTIC ERROR: Prompt asks for CONE but code uses {method}. Use loft pattern: base circle + workplane(offset=height) + top circle + loft()'
+            },
+            'cylinder': {
+                'required': ['.circle(', '.extrude('],  # Cylinder = circle + extrude
+                'forbidden': ['.sphere(', '.box(', 'loft'],
+                'error_msg': 'SEMANTIC ERROR: Prompt asks for CYLINDER but code uses {method}. Use: cq.Workplane("XY").circle(radius).extrude(height)'
+            },
+            'sphere': {
+                'required': ['.sphere('],  # Sphere must use .sphere() method
+                'forbidden': ['revolve', 'loft', '.box(', '.circle('],  # Not revolve/loft
+                'error_msg': 'SEMANTIC ERROR: Prompt asks for SPHERE but code uses {method}. Use: cq.Workplane("XY").sphere(radius)'
+            },
+            'cube': {
+                'required': ['.box('],
+                'forbidden': ['.sphere(', '.circle(', 'revolve'],
+                'error_msg': 'SEMANTIC ERROR: Prompt asks for CUBE/BOX but code uses {method}. Use: cq.Workplane("XY").box(width, height, depth)'
+            },
+            'box': {
+                'required': ['.box('],
+                'forbidden': ['.sphere(', '.circle(', 'revolve'],
+                'error_msg': 'SEMANTIC ERROR: Prompt asks for BOX but code uses {method}. Use: cq.Workplane("XY").box(width, height, depth)'
+            }
+        }
+
+        # Vérifier chaque forme mentionnée dans le prompt
+        for shape, requirements in shape_requirements.items():
+            if shape in prompt_lower:
+                # Vérifier les méthodes interdites
+                for forbidden in requirements['forbidden']:
+                    if forbidden in code:
+                        return requirements['error_msg'].format(method=forbidden)
+
+                # Pour le cone, vérifier qu'il n'utilise PAS juste cylinder
+                if shape == 'cone' and '.extrude(' in code and 'loft' not in code:
+                    # Simple extrude sans loft = cylinder, pas cone
+                    return requirements['error_msg'].format(method='.extrude() without loft')
+
+                # Vérifier que les méthodes requises sont présentes
+                if 'required' in requirements:
+                    missing = []
+                    for required in requirements['required']:
+                        if required not in code:
+                            missing.append(required)
+
+                    if missing:
+                        # Si des méthodes requises manquent, c'est probablement la mauvaise forme
+                        return requirements['error_msg'].format(method=f"missing {', '.join(missing)}")
+
+        return None
 
     def _check_table_legs(self, code: str, prompt: str) -> Optional[str]:
         """
