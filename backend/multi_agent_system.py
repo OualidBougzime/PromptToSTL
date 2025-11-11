@@ -380,7 +380,7 @@ class OrchestratorAgent:
                     from pathlib import Path
                     debug_file = Path(__file__).parent / "output" / "debug_generated_code.py"
                     debug_file.parent.mkdir(exist_ok=True)
-                    with open(debug_file, 'w') as f:
+                    with open(debug_file, 'w', encoding='utf-8') as f:  # ✅ FIX: UTF-8 for Windows emoji support
                         f.write("# Generated code that failed:\n")
                         f.write(code)
                     log.info(f"💾 Saved failed code to: {debug_file}")
@@ -1142,6 +1142,25 @@ class SelfHealingAgent:
                                     log.info("🩹 Fixed: Changed Workplane('XY') to Workplane('XZ') for Y-axis revolve (inline)")
 
                 fixed_code = '\n'.join(lines)
+
+            # 3h: Invalid CadQuery methods (hallucinations)
+            if "has no attribute" in error:
+                # Common hallucinations and their fixes
+                method_fixes = {
+                    'transformedOffset': 'translate',
+                    'transformed': 'rotate',
+                    'torus': None,  # Already handled above
+                    'regularPolygon': 'polygon',
+                    'cone': None,  # Use loft instead
+                }
+
+                for bad_method, good_method in method_fixes.items():
+                    if f"'{bad_method}'" in error or f'"{bad_method}"' in error:
+                        if good_method:
+                            fixed_code = fixed_code.replace(f'.{bad_method}(', f'.{good_method}(')
+                            log.info(f"🩹 Fixed: Replaced .{bad_method}() with .{good_method}()")
+                        else:
+                            log.warning(f"⚠️ Method .{bad_method}() detected but no automatic fix available")
 
         return fixed_code
 
