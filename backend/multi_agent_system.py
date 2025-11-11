@@ -989,9 +989,11 @@ class SelfHealingAgent:
             log.info(f"🔧 Code was modified by _basic_fixes")
             log.debug(f"📝 Fixed code (first 500 chars):\n{fixed_code[:500]}")
 
-        # Si correction basique insuffisante, utiliser LLM
-        if fixed_code == code and len(errors) > 0:
-            fixed_code = await self._llm_heal_code(code, errors)
+        # ⚠️ LLM healing DISABLED - deepseek-coder:6.7b adds bugs instead of fixing them
+        # Problem: Adds hallucinated imports (e.g., 'import Helpers'), generates syntax errors
+        # Solution: Keep only deterministic _basic_fixes which work reliably
+        # if fixed_code == code and len(errors) > 0:
+        #     fixed_code = await self._llm_heal_code(code, errors)
 
         # Vérifier si le code est corrigé
         try:
@@ -1483,6 +1485,32 @@ class SelfHealingAgent:
                                 break
 
                     fixed_code = '\n'.join(lines)
+
+        # PROACTIVE FIX: Always remove hallucinated imports at the end (regardless of errors)
+        # This prevents issues even if LLM accidentally generates these imports
+        hallucinated_modules = ['Helpers', 'cadquery.helpers', 'cq_helpers', 'utils', 'cad_utils',
+                                'geometry_utils', 'shape_utils', 'cq_utils']
+
+        lines = fixed_code.split('\n')
+        fixed_lines = []
+        removed_any = False
+
+        for line in lines:
+            # Skip any line that imports a hallucinated module
+            should_skip = False
+            for module in hallucinated_modules:
+                if f'import {module}' in line or f'from {module}' in line:
+                    log.info(f"🩹 PROACTIVE: Removed hallucinated import: {line.strip()}")
+                    removed_any = True
+                    should_skip = True
+                    break
+
+            if not should_skip:
+                fixed_lines.append(line)
+
+        if removed_any:
+            fixed_code = '\n'.join(fixed_lines)
+            log.info("✅ Proactive hallucinated import cleanup completed")
 
         return fixed_code
 
