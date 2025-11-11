@@ -740,11 +740,14 @@ Only use these VALIDATED methods (hallucinating non-existent methods causes fail
 
 ❌ THESE DO NOT EXIST (common hallucinations):
 - .torus(major, minor) → DOES NOT EXIST! Use revolve pattern below
+- .cone() → DOES NOT EXIST! Use circle+loft pattern
+- .cylinder() → DOES NOT EXIST! Use circle+extrude
 - .regularPolygon() → Use .polygon()
-- .cone() → Use circle+loft pattern
 - revolve(angle=X) → Use revolve(X) positional
 - loft(closed=True) → No 'closed' param
 - cut() without argument → Use cutThruAll()
+- sweep(sweepAngle=X) → sweep() has NO sweepAngle param! Use sagittaArc/threePointArc
+- offset2D(dist, 3.14) → kind must be STRING "arc" not number
 
 🚨 MANDATORY TORUS PATTERN (NO .torus() METHOD EXISTS!):
 ========================================================
@@ -773,6 +776,94 @@ result = profile.revolve(360, (0, 0, 0), (0, 1, 0))  # ❌ Missing clean=False!
 ```
 
 ⚠️ Important: MUST use XZ plane (not XY) for Y-axis revolve, or you get "No pending wires" error!
+
+🚨 ULTRA-SPECIFIC SHAPE PATTERNS (MUST FOLLOW EXACTLY!) 🚨
+=================================================================
+
+### TORUS (major radius R, minor radius r):
+```python
+# ✅ CORRECT - ONLY way that works:
+import cadquery as cq
+profile = cq.Workplane("XZ").moveTo(50, 0).circle(8)  # Profile at major_r=50, minor_r=8
+result = profile.revolve(360, (0, 0, 0), (0, 1, 0), clean=False)
+
+# ❌ WRONG - DO NOT USE:
+result = cq.Workplane("XY").sphere(50)  # This is SPHERE not TORUS!
+result = cq.Workplane("XY").torus(50, 8)  # .torus() DOES NOT EXIST!
+result = profile.sweep(path)  # sweep() needs Wire/Edge, not for simple torus
+```
+
+### CONE (base diameter D, height H):
+```python
+# ✅ CORRECT - Use loft between two circles:
+import cadquery as cq
+base_radius = 25  # diameter 50 / 2
+result = (cq.Workplane("XY")
+    .circle(base_radius)           # Base circle
+    .workplane(offset=60)          # Height 60
+    .circle(0.1)                   # Small top (point) - NOT zero!
+    .loft())                       # Loft to create cone
+
+# ❌ WRONG - DO NOT USE:
+result = cq.Workplane("XY").circle(25).extrude(60)  # This is CYLINDER not CONE!
+result = cq.Workplane("XY").cone(25, 60)  # .cone() DOES NOT EXIST!
+```
+
+### CYLINDER (diameter D, height H):
+```python
+# ✅ CORRECT - Use circle + extrude:
+import cadquery as cq
+radius = 20  # diameter 40 / 2
+result = cq.Workplane("XY").circle(radius).extrude(60)
+
+# ❌ WRONG - DO NOT USE:
+result = cq.Workplane("XY").cylinder(20, 60)  # .cylinder() DOES NOT EXIST!
+```
+
+### ARC (radius R, sweep angle A degrees):
+```python
+# ✅ CORRECT - Use sagittaArc or threePointArc (NO sweepAngle parameter!):
+import cadquery as cq
+import math
+
+# Method 1: Use sagittaArc (arc by sagitta/bulge)
+radius = 60
+sweep_deg = 210
+sweep_rad = math.radians(sweep_deg)
+# Calculate chord and sagitta for the arc
+chord_length = 2 * radius * math.sin(sweep_rad / 2)
+sagitta = radius * (1 - math.cos(sweep_rad / 2))
+
+result = (cq.Workplane("XY")
+    .sagittaArc((chord_length, 0), sagitta)  # Arc by chord and sagitta
+    .close()  # Close the path
+    .extrude(10))  # Extrude to 3D if needed
+
+# Method 2: Use threePointArc (simpler for specific angles)
+# For 210° arc with radius 60:
+start = (60, 0)
+mid = (60 * math.cos(math.radians(105)), 60 * math.sin(math.radians(105)))  # Middle point
+end = (60 * math.cos(math.radians(210)), 60 * math.sin(math.radians(210)))  # End point
+
+result = (cq.Workplane("XY")
+    .moveTo(*start)
+    .threePointArc(mid, end)  # Three-point arc
+    .close()
+    .extrude(10))
+
+# ❌ WRONG - DO NOT USE:
+result = arc.sweep(path, sweepAngle=210)  # sweep() has NO sweepAngle parameter!
+result = cq.Workplane("XY").arc(60, 210)  # Wrong signature for arc()
+```
+
+🚨 CRITICAL RULES TO AVOID ERRORS:
+1. TORUS: ALWAYS use revolve pattern with XZ plane + moveTo + clean=False
+2. CONE: ALWAYS use loft (NOT extrude) with two circles of different radii
+3. CYLINDER: ALWAYS use circle + extrude (NOT loft with same radii)
+4. ARC: NEVER use sweepAngle parameter (doesn't exist!)
+5. SPHERE: ONLY use .sphere() method (NOT revolve)
+6. polarArray/rarray count: MUST be integer, not float (use int(4) not 4.0)
+7. offset2D kind: MUST be string "arc" or "intersection", NOT a number
 
 Cone/Frustum:
 ```python
