@@ -820,69 +820,64 @@ result = cq.Workplane("XY").circle(radius).extrude(60)
 result = cq.Workplane("XY").cylinder(20, 60)  # .cylinder() DOES NOT EXIST!
 ```
 
-### ARC - 3D Arc (segment de tore / curved pipe):
+### ARC - Annular Sector (portion de couronne / annular segment) - DEFAULT for "arc":
 ```python
-# ✅ CORRECT - Arc 3D = segment de tore (partial revolve) - USE THIS FOR "ARC"!
+# ✅ CORRECT - Arc = Annular sector (portion de couronne entre 2 rayons)
+import cadquery as cq
+import math
+
+# Arc annulaire : portion de couronne circulaire
+R_ext = 60        # Rayon extérieur (outer radius)
+R_int = 50        # Rayon intérieur (inner radius) - use 0 for solid sector
+theta_deg = 210   # Angle de balayage (sweep angle in degrees)
+height = 10       # Épaisseur d'extrusion (extrusion height)
+start_deg = 0     # Angle de départ (start angle, default 0)
+
+th = math.radians(theta_deg)
+a0 = math.radians(start_deg)
+a1 = a0 + th
+
+def P(R, a):  # Polar to cartesian
+    return (R * math.cos(a), R * math.sin(a))
+
+# Closed 2D profile: outer arc → radial line → inner arc → radial line back
+result = (cq.Workplane("XY")
+    .moveTo(*P(R_ext, a0))
+    .threePointArc(P(R_ext, a0 + th/2), P(R_ext, a1))  # Outer arc
+    .lineTo(*P(R_int, a1))                              # Radial side
+    .threePointArc(P(R_int, a0 + th/2), P(R_int, a0))  # Inner arc
+    .close()
+    .extrude(height)
+)
+
+# ⚠️ IMPORTANT: This creates a "pie slice" or "annular segment" shape
+# Like a portion of a ring/donut viewed from above (2D extruded)
+
+# ❌ WRONG - These create wrong shapes:
+result = cq.Workplane("XY").circle(60).extrude(10)  # Creates full cylinder, not arc sector!
+result = profile.revolve(210, (0,0,0), (0,1,0))     # Creates 3D curved pipe (torus segment), not annular sector!
+```
+
+### ARC - 3D Curved Pipe (segment de tore) - ONLY if "curved pipe" or "3D arc" explicitly mentioned:
+```python
+# Arc 3D = segment de tore (partial torus) for curved pipe applications
 import cadquery as cq
 
-# 3D Arc: curved pipe with radius R, sweep angle A degrees, pipe thickness T
 major_radius = 60  # Distance from center to arc centerline
 minor_radius = 5   # Pipe thickness (radius of circular cross-section)
 sweep_angle = 210  # Degrees of arc (< 360 for partial torus)
 
-# Create circular profile, position at major_radius, then partial revolve
 profile = cq.Workplane("XZ").moveTo(major_radius, 0).circle(minor_radius)
 result = profile.revolve(sweep_angle, (0, 0, 0), (0, 1, 0), clean=False)
-
-# ⚠️ IMPORTANT: Use clean=False to avoid BRep_API errors!
-# This creates a 3D curved pipe (partial torus) - the most common meaning of "arc"
-
-# ❌ WRONG - These create wrong shapes:
-result = cq.Workplane("XY").cylinder(5, 60)  # Creates straight cylinder, not curved arc!
-result = cq.Workplane("XY").circle(60).extrude(10)  # Creates flat disk, not curved pipe!
-```
-
-### ARC - 2D Arc (flat, extruded arc) - ONLY if explicitly requested:
-```python
-# Use sagittaArc or threePointArc for 2D arcs (NO sweepAngle parameter!):
-import cadquery as cq
-import math
-
-# Method 1: Use sagittaArc (arc by sagitta/bulge)
-radius = 60
-sweep_deg = 210
-sweep_rad = math.radians(sweep_deg)
-# Calculate chord and sagitta for the arc
-chord_length = 2 * radius * math.sin(sweep_rad / 2)
-sagitta = radius * (1 - math.cos(sweep_rad / 2))
-
-result = (cq.Workplane("XY")
-    .sagittaArc((chord_length, 0), sagitta)  # Arc by chord and sagitta
-    .close()  # Close the path
-    .extrude(10))  # Extrude to 3D if needed
-
-# Method 2: Use threePointArc (simpler for specific angles)
-# For 210° arc with radius 60:
-start = (60, 0)
-mid = (60 * math.cos(math.radians(105)), 60 * math.sin(math.radians(105)))  # Middle point
-end = (60 * math.cos(math.radians(210)), 60 * math.sin(math.radians(210)))  # End point
-
-result = (cq.Workplane("XY")
-    .moveTo(*start)
-    .threePointArc(mid, end)  # Three-point arc
-    .close()
-    .extrude(10))
-
-# ❌ WRONG - DO NOT USE:
-result = arc.sweep(path, sweepAngle=210)  # sweep() has NO sweepAngle parameter!
-result = cq.Workplane("XY").arc(60, 210)  # Wrong signature for arc()
 ```
 
 🚨 CRITICAL RULES TO AVOID ERRORS:
 1. TORUS: ALWAYS use revolve pattern with XZ plane + moveTo + clean=False
 2. CONE: ALWAYS use loft (NOT extrude) with two circles of different radii
 3. CYLINDER: ALWAYS use circle + extrude (NOT loft with same radii)
-4. ARC (3D): DEFAULT = segment de tore (partial revolve < 360°) - NOT cylinder or flat extrude!
+4. ARC: DEFAULT = annular sector (portion de couronne) with threePointArc + lineTo + close + extrude
+   - Use polar coordinates: P(R, angle) = (R*cos(a), R*sin(a))
+   - NOT just circle().extrude() (makes full cylinder, not arc sector!)
 5. SPHERE: ONLY use .sphere() method (NOT revolve)
 6. polarArray/rarray count: MUST be integer, not float (use int(4) not 4.0)
 7. offset2D kind: MUST be string "arc" or "intersection", NOT a number
