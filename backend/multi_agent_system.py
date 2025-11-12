@@ -1138,11 +1138,31 @@ class SelfHealingAgent:
                 fixed_code = fixed_code.replace('.unionAllParts()', '.combine()')
                 log.info("🩹 Fixed: Replaced .unionAllParts() with .combine()")
 
+            # 3c0: .unionParts() doesn't exist (variant without "All")
+            if "'Workplane' object has no attribute 'unionParts'" in error:
+                fixed_code = fixed_code.replace('.unionParts()', '.union()')
+                log.info("🩹 Fixed: Replaced .unionParts() with .union()")
+
             # 3c1: .splineThroughPoints() doesn't exist - VASE fix
             if "'Workplane' object has no attribute 'splineThroughPoints'" in error:
                 # Strategy: Replace with .spline() or use lineTo() segments
                 fixed_code = fixed_code.replace('.splineThroughPoints(', '.spline(')
                 log.info("🩹 Fixed: Replaced .splineThroughPoints() with .spline()")
+
+            # 3c1a: .spline() missing required argument 'listOfXYTuple'
+            if "Workplane.spline() missing 1 required positional argument: 'listOfXYTuple'" in error:
+                # Strategy: Comment out .spline() - can't auto-fix without knowing points
+                lines = fixed_code.split('\n')
+                fixed_lines = []
+                for line in lines:
+                    if '.spline()' in line and 'listOfXYTuple' not in line:
+                        indent_match = re.match(r'(\s*)', line)
+                        indent = indent_match.group(1) if indent_match else ''
+                        fixed_lines.append(f'{indent}# {line.strip()}  # .spline() needs listOfXYTuple argument')
+                        log.info(f"🩹 Commented out invalid .spline(): {line.strip()}")
+                    else:
+                        fixed_lines.append(line)
+                fixed_code = '\n'.join(fixed_lines)
 
             # 3c1b: .helix() doesn't exist - SPRING fix
             if "'Workplane' object has no attribute 'helix'" in error:
