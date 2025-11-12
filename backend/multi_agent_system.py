@@ -1372,8 +1372,8 @@ class SelfHealingAgent:
                             # Still in wrong code section - skip it
                             continue
 
-                    # Detect start of wrong shape creation code
-                    if not replaced and ('.circle(' in line or '.extrude(' in line or 'revolve' in line or '.sweep(' in line):
+                    # Detect start of wrong shape creation code (any primitive that's not annular sector)
+                    if not replaced and ('.circle(' in line or '.extrude(' in line or 'revolve' in line or '.sweep(' in line or '.box(' in line or '.sphere(' in line or '.cylinder(' in line):
                         # Get indent
                         indent_match = re.match(r'(\s*)', line)
                         indent = indent_match.group(1) if indent_match else ''
