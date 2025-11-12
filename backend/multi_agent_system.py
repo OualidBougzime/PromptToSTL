@@ -1316,57 +1316,82 @@ class SelfHealingAgent:
                 fixed_code = '\n'.join(new_lines)
 
             elif "SEMANTIC ERROR: Prompt asks for ARC" in error:
-                log.info("🩹 Attempting semantic fix: Replace disk revolve with arc 3D (segment de tore)")
+                log.info("🩹 Attempting semantic fix: Replace wrong code with annular sector (portion de couronne)")
 
                 # Extract parameters from prompt/error
-                major_radius = 60  # default
-                minor_radius = 5  # default (pipe thickness)
-                sweep_angle = 210  # default
+                R_ext = 60        # default outer radius
+                R_int = 50        # default inner radius (0.83 * outer)
+                theta_deg = 210   # default sweep angle
+                height = 10       # default extrusion height
+                start_deg = 0     # default start angle
 
                 import re
                 # Try to extract from error or use defaults
                 radius_match = re.search(r'radius[:\s]*(\d+)', error.lower())
-                angle_match = re.search(r'angle[:\s]*(\d+)', error.lower())
+                angle_match = re.search(r'(?:sweep|angle)[:\s]*(\d+)', error.lower())
                 if radius_match:
-                    major_radius = int(radius_match.group(1))
+                    R_ext = int(radius_match.group(1))
+                    R_int = int(R_ext * 0.83)  # Inner radius ~83% of outer
                 if angle_match:
-                    sweep_angle = int(angle_match.group(1))
+                    theta_deg = int(angle_match.group(1))
 
-                # Replace incorrect arc code with correct segment de tore pattern
+                # Find result variable name
                 lines = fixed_code.split('\n')
-                new_lines = []
-                result_var = 'result'  # default
-
-                # Find the variable name that gets shape result (revolve or sweep)
+                result_var = 'result'
                 for line in lines:
-                    if 'revolve' in line.lower() or 'sweep' in line.lower():
+                    if '=' in line and ('.circle(' in line or '.extrude(' in line or 'revolve' in line or 'sweep' in line):
                         var_match = re.match(r'(\s*)(\w+)\s*=\s*', line)
                         if var_match:
                             result_var = var_match.group(2)
-                        break
+                            break
 
-                # Rebuild code with correct arc 3D pattern
-                skip_shape_lines = False
+                # Rebuild with annular sector pattern
+                new_lines = []
+                skip_wrong_code = False
                 replaced = False
-                for line in lines:
-                    # Skip lines with shape creation (.circle + revolve/sweep, or just sweep)
-                    if not replaced and ('.sweep(' in line or ('.circle(' in line and ('revolve' in line or skip_shape_lines))):
-                        skip_shape_lines = True
-                        # Get indent from original line
-                        indent_match = re.match(r'(\s*)', line)
-                        indent = indent_match.group(1) if indent_match else ''
 
-                        # Insert correct arc 3D code
-                        new_lines.append(f'{indent}# Arc 3D = segment de tore (fixed by SelfHealingAgent)')
-                        new_lines.append(f'{indent}profile = cq.Workplane("XZ").moveTo({major_radius}, 0).circle({minor_radius})')
-                        new_lines.append(f'{indent}{result_var} = profile.revolve({sweep_angle}, (0, 0, 0), (0, 1, 0), clean=False)')
-                        log.info(f"🩹 Replaced disk revolve/sweep with arc 3D (major_r={major_radius}, minor_r={minor_radius}, angle={sweep_angle})")
-                        replaced = True
-                        skip_shape_lines = False
+                for line in lines:
+                    # Skip wrong shape creation code
+                    if not replaced and ('.circle(' in line or '.extrude(' in line or 'revolve' in line or '.sweep(' in line):
+                        if not skip_wrong_code:
+                            # Get indent
+                            indent_match = re.match(r'(\s*)', line)
+                            indent = indent_match.group(1) if indent_match else ''
+
+                            # Insert correct annular sector code
+                            new_lines.append(f'{indent}# Arc annulaire (annular sector) - fixed by SelfHealingAgent')
+                            new_lines.append(f'{indent}import math')
+                            new_lines.append(f'{indent}')
+                            new_lines.append(f'{indent}R_ext = {R_ext}')
+                            new_lines.append(f'{indent}R_int = {R_int}')
+                            new_lines.append(f'{indent}theta_deg = {theta_deg}')
+                            new_lines.append(f'{indent}height = {height}')
+                            new_lines.append(f'{indent}start_deg = {start_deg}')
+                            new_lines.append(f'{indent}')
+                            new_lines.append(f'{indent}th = math.radians(theta_deg)')
+                            new_lines.append(f'{indent}a0 = math.radians(start_deg)')
+                            new_lines.append(f'{indent}a1 = a0 + th')
+                            new_lines.append(f'{indent}')
+                            new_lines.append(f'{indent}def P(R, a):')
+                            new_lines.append(f'{indent}    return (R * math.cos(a), R * math.sin(a))')
+                            new_lines.append(f'{indent}')
+                            new_lines.append(f'{indent}{result_var} = (cq.Workplane("XY")')
+                            new_lines.append(f'{indent}    .moveTo(*P(R_ext, a0))')
+                            new_lines.append(f'{indent}    .threePointArc(P(R_ext, a0 + th/2), P(R_ext, a1))')
+                            new_lines.append(f'{indent}    .lineTo(*P(R_int, a1))')
+                            new_lines.append(f'{indent}    .threePointArc(P(R_int, a0 + th/2), P(R_int, a0))')
+                            new_lines.append(f'{indent}    .close()')
+                            new_lines.append(f'{indent}    .extrude(height)')
+                            new_lines.append(f'{indent})')
+                            log.info(f"🩹 Replaced wrong code with annular sector (R_ext={R_ext}, R_int={R_int}, angle={theta_deg}°)")
+                            replaced = True
+                            skip_wrong_code = True
                         continue
-                    elif skip_shape_lines and ('revolve' in line or 'sweep' in line):
-                        skip_shape_lines = False
+                    elif skip_wrong_code and ('.circle(' in line or '.extrude(' in line or 'revolve' in line or 'sweep' in line):
+                        # Skip continuation of wrong code
                         continue
+                    else:
+                        skip_wrong_code = False
 
                     new_lines.append(line)
                 fixed_code = '\n'.join(new_lines)
@@ -1790,9 +1815,9 @@ class CriticAgent:
         # Définir les correspondances forme → méthodes requises
         shape_requirements = {
             'arc': {
-                'required': ['revolve', 'moveTo'],  # Arc 3D = segment de tore (partial revolve)
-                'forbidden': ['.sphere(', '.box('],
-                'error_msg': 'SEMANTIC ERROR: Prompt asks for ARC (3D curved pipe) but code uses {method}. Arc = segment de tore (partial revolve): profile = cq.Workplane("XZ").moveTo(major_r, 0).circle(minor_r); result = profile.revolve(angle, (0,0,0), (0,1,0), clean=False)'
+                'required': ['threePointArc', 'lineTo', 'close'],  # Arc annulaire = annular sector
+                'forbidden': ['.sphere(', '.box(', '.revolve('],
+                'error_msg': 'SEMANTIC ERROR: Prompt asks for ARC (annular sector / portion de couronne) but code uses {method}. Use annular sector pattern: moveTo(R_ext, 0) → threePointArc(outer) → lineTo(R_int) → threePointArc(inner) → close() → extrude()'
             },
             'torus': {
                 'required': ['revolve', 'moveTo'],  # Torus = profile.moveTo().circle().revolve()
