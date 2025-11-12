@@ -334,9 +334,27 @@ class ArchitectAgent:
 
 Your role: Analyze user requests and decompose them into geometric primitives and operations.
 
+SHAPE RECOGNITION (CRITICAL - Learn these patterns):
+- **ARC** (with radius + sweep angle) = ANNULAR SECTOR (portion de couronne / pie slice)
+  → Description: "An annular sector with outer radius R, sweep angle A degrees"
+  → Primitives: threePointArc, lineTo, close, extrude
+  → NOT a swept cylinder! NOT revolve! It's a 2D arc profile extruded!
+
+- **TORUS** (major radius + minor radius) = Revolved circular profile
+  → Description: "A torus with major radius R_major and minor radius R_minor"
+  → Primitives: circle, revolve
+
+- **CONE** (base diameter + height) = Loft between two circles
+  → Description: "A cone with base diameter D and height H"
+  → Primitives: circle, workplane, loft
+
+- **CYLINDER** (radius + height) = Circle extruded
+  → Description: "A cylinder with radius R and height H"
+  → Primitives: circle, extrude
+
 ANALYSIS PROCESS (think step by step):
-1. IDENTIFY the shape: What exactly is the user asking for?
-2. PRIMITIVES: What basic shapes are needed? (box, cylinder, sphere, cone, torus, polygon, etc.)
+1. IDENTIFY the shape: What exactly is the user asking for? Check SHAPE RECOGNITION above!
+2. PRIMITIVES: What basic shapes are needed? (box, cylinder, sphere, cone, torus, polygon, arc, etc.)
 3. OPERATIONS: What transformations? (extrude, revolve, loft, sweep, fillet, chamfer, union, cut, etc.)
 4. SEQUENCE: In what order should operations be applied?
 5. PARAMETERS: Extract ALL numeric values from the prompt (dimensions, angles, counts, etc.)
