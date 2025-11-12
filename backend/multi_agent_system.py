@@ -1138,6 +1138,27 @@ class SelfHealingAgent:
                 fixed_code = fixed_code.replace('.unionAllParts()', '.combine()')
                 log.info("🩹 Fixed: Replaced .unionAllParts() with .combine()")
 
+            # 3c1: .splineThroughPoints() doesn't exist - VASE fix
+            if "'Workplane' object has no attribute 'splineThroughPoints'" in error:
+                # Strategy: Replace with .spline() or use lineTo() segments
+                fixed_code = fixed_code.replace('.splineThroughPoints(', '.spline(')
+                log.info("🩹 Fixed: Replaced .splineThroughPoints() with .spline()")
+
+            # 3c1b: .helix() doesn't exist - SPRING fix
+            if "'Workplane' object has no attribute 'helix'" in error:
+                # Strategy: Comment out .helix() and suggest manual helix
+                lines = fixed_code.split('\n')
+                fixed_lines = []
+                for line in lines:
+                    if '.helix(' in line:
+                        indent_match = re.match(r'(\s*)', line)
+                        indent = indent_match.group(1) if indent_match else ''
+                        fixed_lines.append(f'{indent}# {line.strip()}  # .helix() not available - use manual helix generation')
+                        log.info(f"🩹 Commented out .helix(): {line.strip()}")
+                    else:
+                        fixed_lines.append(line)
+                fixed_code = '\n'.join(fixed_lines)
+
             # 3c2: Chamfer/fillet on non-existent edges - PIPE fix
             if "There are no suitable edges for chamfer or fillet" in error:
                 # Strategy: Comment out problematic chamfer/fillet calls
@@ -1773,15 +1794,53 @@ class SelfHealingAgent:
 **Your task:** Return ONLY the corrected Python code in ```python``` block. NO explanations. NO comments about changes. Just the fixed code."""
 
         try:
-            response = await self.llm.generate(prompt, max_tokens=1024, temperature=0.3)
+            # Augmenté à 2048 tokens pour permettre code complet
+            response = await self.llm.generate(prompt, max_tokens=2048, temperature=0.1)
 
-            # Extraire le code de la réponse
+            # Extraction améliorée du code avec plusieurs stratégies
+            healed_code = None
+
+            # Stratégie 1: Chercher ```python ... ```
             code_match = re.search(r"```python\s*(.*?)\s*```", response, re.DOTALL)
             if code_match:
                 healed_code = code_match.group(1).strip()
-            else:
-                # Si pas de markdown, retourner la réponse brute
+
+            # Stratégie 2: Chercher juste ``` ... ``` (sans language tag)
+            if not healed_code:
+                code_match = re.search(r"```\s*(.*?)\s*```", response, re.DOTALL)
+                if code_match:
+                    healed_code = code_match.group(1).strip()
+
+            # Stratégie 3: Prendre tout après "import cadquery"
+            if not healed_code and 'import cadquery' in response:
+                import_idx = response.find('import cadquery')
+                healed_code = response[import_idx:].strip()
+
+            # Stratégie 4: Fallback - retourner brut
+            if not healed_code:
                 healed_code = response.strip()
+
+            # Nettoyer les explications avant/après le code
+            lines = healed_code.split('\n')
+            code_lines = []
+            in_code = False
+
+            for line in lines:
+                stripped = line.strip()
+                # Détecter début du code (import ou commentaire Python)
+                if not in_code and (stripped.startswith('import ') or stripped.startswith('from ') or stripped.startswith('#')):
+                    in_code = True
+
+                # Si on est dans le code, ajouter la ligne
+                if in_code:
+                    # Arrêter si on trouve des explications en texte
+                    if stripped and not any(stripped.startswith(x) for x in ['#', 'import', 'from', ' ', '\t']) and '=' not in line and '(' not in line:
+                        # Ligne qui ressemble à du texte explicatif, pas du code
+                        break
+                    code_lines.append(line)
+
+            if code_lines:
+                healed_code = '\n'.join(code_lines)
 
             # Nettoyer les caractères Unicode problématiques (fullwidth + block drawing + autres)
             unicode_replacements = {
