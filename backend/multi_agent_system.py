@@ -994,11 +994,13 @@ class SelfHealingAgent:
             log.info(f"🔧 Code was modified by _basic_fixes")
             log.debug(f"📝 Fixed code (first 500 chars):\n{fixed_code[:500]}")
 
-        # ⚠️ LLM healing DISABLED - deepseek-coder:6.7b adds bugs instead of fixing them
-        # Problem: Adds hallucinated imports (e.g., 'import Helpers'), generates syntax errors
-        # Solution: Keep only deterministic _basic_fixes which work reliably
-        # if fixed_code == code and len(errors) > 0:
-        #     fixed_code = await self._llm_heal_code(code, errors)
+        # ✅ LLM healing RE-ENABLED with improved anti-hallucination prompt
+        # If basic fixes didn't work, try LLM healing as last resort
+        if fixed_code == code and len(errors) > 0:
+            log.info("🤖 Basic fixes didn't help, trying LLM healing...")
+            fixed_code = await self._llm_heal_code(code, errors)
+        elif fixed_code != code:
+            log.info("✅ Basic fixes resolved the issue")
 
         # Vérifier si le code est corrigé
         try:
@@ -1720,44 +1722,55 @@ class SelfHealingAgent:
 
     async def _llm_heal_code(self, code: str, errors: List[str]) -> str:
         """
-        Utilise le LLM pour corriger le code
+        Utilise le LLM pour corriger le code avec prompt anti-hallucination strict
         """
 
         errors_text = "\n".join([f"- {e}" for e in errors[:3]])  # Max 3 erreurs
 
-        prompt = f"""Fix the following CadQuery Python code errors:
+        prompt = f"""You are a CadQuery code debugger. Fix the following CadQuery Python code errors.
 
-Errors:
+**CRITICAL RULES - NEVER VIOLATE:**
+
+1. **NO HALLUCINATED IMPORTS** - ONLY use these imports:
+   ✅ ALLOWED: import cadquery as cq, import math, from pathlib import Path
+   ❌ FORBIDDEN: Helpers, cadquery.helpers, cq_helpers, utils, geometry_utils, shape_utils
+
+2. **NO HALLUCINATED METHODS** - Workplane does NOT have these methods:
+   ❌ .torus(), .cylinder(), .unionAllParts(), .regularPolygon(), .Helix()
+   ❌ .workplaneFromPlane(), .createHelix(), .sweepAlongPath()
+   ✅ USE: .circle(), .extrude(), .revolve(), .loft(), .sphere(), .box(), .combine()
+
+3. **FIX THE ERROR, NOT REWRITE** - Only change the lines causing errors
+   - Keep existing variable names
+   - Keep existing structure
+   - Do NOT add unnecessary code
+
+4. **COMMON FIXES:**
+
+   - "Can not return Nth element of empty list" → `.faces()` selector wrong
+     FIX: Remove selector or use .faces(">Z") / .faces("<Z")
+
+   - "No pending wires present" → Wrong plane for revolve
+     FIX: Use cq.Workplane("XZ") for vertical revolve, "XY" for horizontal
+
+   - ".multiply() got Vector instead of float" → Wrong argument type
+     FIX: Use offset=5.0 (float), not offset=Vector(0,0,5)
+
+   - "There are no suitable edges for chamfer" → Edges don't exist
+     FIX: Comment out .chamfer() or .fillet() line
+
+   - "local variable referenced before assignment" → Bad Vector() usage
+     FIX: Use tuple (x, y, z) instead of complex Vector expressions
+
+**Errors to fix:**
 {errors_text}
 
-Code:
+**Code to fix:**
 ```python
-{code[:1000]}
+{code[:1500]}
 ```
 
-COMMON CADQUERY FIXES:
-
-1. "No pending wires present" when using revolve():
-   - Ensure the profile is on the correct plane (XZ for vertical revolve)
-   - The circle/shape must be closed and valid
-   - Example: profile = cq.Workplane("XZ").moveTo(40, 0).circle(10)
-
-2. "BRep_API: command not done" errors:
-   - Check revolve axis format: revolve(360, (0,0,0), (0,1,0))
-   - Ensure shapes are properly closed
-   - Avoid degenerate geometry (zero-size features)
-
-3. Torus generation:
-   CORRECT:
-   profile = cq.Workplane("XZ").moveTo(major_radius, 0).circle(minor_radius)
-   result = profile.revolve(360, (0, 0, 0), (0, 1, 0))
-
-4. Sphere generation:
-   CORRECT: result = cq.Workplane("XY").sphere(radius)
-
-Provide the corrected code:
-```python
-"""
+**Your task:** Return ONLY the corrected Python code in ```python``` block. NO explanations. NO comments about changes. Just the fixed code."""
 
         try:
             response = await self.llm.generate(prompt, max_tokens=1024, temperature=0.3)
