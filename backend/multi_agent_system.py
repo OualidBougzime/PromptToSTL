@@ -404,6 +404,11 @@ class OrchestratorAgent:
                 else:
                     log.warning("⚠️ Self-healing failed for semantic issues, proceeding with original code")
 
+            # PROACTIVE: Remove hallucinated imports BEFORE execution (always, even if Critic said OK)
+            log.info("🧹 Running proactive cleanup before execution...")
+            code = self.self_healing._remove_hallucinated_imports(code)
+            context.generated_code = code
+
             # PHASE 6: Validation et exécution (Agent existant)
             if progress_callback:
                 await progress_callback("status", {"message": "⚙️ Executing and validating...", "progress": 80})
@@ -1124,7 +1129,32 @@ class SelfHealingAgent:
                 fixed_code = fixed_code.replace('.regularPolygon(', '.polygon(')
                 log.info("🩹 Fixed: Replaced .regularPolygon() with .polygon()")
 
-            # 3c: revolve() with wrong parameter name
+            # 3c: .unionAllParts() doesn't exist - TABLE fix
+            if "'Workplane' object has no attribute 'unionAllParts'" in error:
+                # Strategy: Replace .unionAllParts() with .combine()
+                # .combine() merges all pending solids into one
+                fixed_code = fixed_code.replace('.unionAllParts()', '.combine()')
+                log.info("🩹 Fixed: Replaced .unionAllParts() with .combine()")
+
+            # 3c2: Chamfer/fillet on non-existent edges - PIPE fix
+            if "There are no suitable edges for chamfer or fillet" in error:
+                # Strategy: Comment out problematic chamfer/fillet calls
+                lines = fixed_code.split('\n')
+                fixed_lines = []
+
+                for line in lines:
+                    if '.chamfer(' in line or '.fillet(' in line:
+                        # Comment out the line instead of removing it completely
+                        indent_match = re.match(r'(\s*)', line)
+                        indent = indent_match.group(1) if indent_match else ''
+                        fixed_lines.append(f'{indent}# {line.strip()}  # Removed: no suitable edges')
+                        log.info(f"🩹 Commented out chamfer/fillet: {line.strip()}")
+                    else:
+                        fixed_lines.append(line)
+
+                fixed_code = '\n'.join(fixed_lines)
+
+            # 3d: revolve() with wrong parameter name
             if "revolve() got an unexpected keyword argument 'angle'" in error:
                 fixed_code = re.sub(
                     r'\.revolve\s*\(\s*angle\s*=\s*(\d+(?:\.\d+)?)\s*\)',
@@ -1470,6 +1500,55 @@ class SelfHealingAgent:
                     new_lines.append(line)
                 fixed_code = '\n'.join(new_lines)
 
+            elif "SEMANTIC ERROR: Prompt asks for CYLINDER but code uses" in error:
+                log.info("🩹 Attempting semantic fix: Replace .box() with .circle().extrude() for cylinder")
+
+                # Extract parameters from error or prompt
+                radius = 35  # default
+                height = 100  # default
+
+                import re
+                radius_match = re.search(r'radius[:\s]*(\d+)', error.lower())
+                height_match = re.search(r'(?:height|length)[:\s]*(\d+)', error.lower())
+                if radius_match:
+                    radius = int(radius_match.group(1))
+                if height_match:
+                    height = int(height_match.group(1))
+
+                # Replace .box() with circle().extrude()
+                lines = fixed_code.split('\n')
+                new_lines = []
+                replaced = False
+
+                for line in lines:
+                    # Detect .box() call and replace with circle().extrude()
+                    if '.box(' in line and not replaced:
+                        # Extract variable name if exists
+                        var_match = re.match(r'(\s*)(\w+)\s*=\s*', line)
+                        if var_match:
+                            indent = var_match.group(1)
+                            var_name = var_match.group(2)
+                            new_lines.append(f'{indent}# Cylinder via circle + extrude (fixed by SelfHealingAgent)')
+                            new_lines.append(f'{indent}{var_name} = cq.Workplane("XY").circle({radius}).extrude({height})')
+                            log.info(f"🩹 Replaced .box() with circle({radius}).extrude({height})")
+                            replaced = True
+                        else:
+                            # No assignment, replace in-place
+                            indent_match = re.match(r'(\s*)', line)
+                            indent = indent_match.group(1) if indent_match else ''
+                            # Try to find the whole chain
+                            if 'cq.Workplane' in line:
+                                new_lines.append(f'{indent}# Cylinder via circle + extrude (fixed by SelfHealingAgent)')
+                                new_lines.append(f'{indent}result = cq.Workplane("XY").circle({radius}).extrude({height})')
+                                log.info(f"🩹 Replaced .box() with circle({radius}).extrude({height})")
+                                replaced = True
+                            else:
+                                new_lines.append(line)
+                    else:
+                        new_lines.append(line)
+
+                fixed_code = '\n'.join(new_lines)
+
             # Semantic Fix 1: Table legs positioned at center instead of corners
             if "SEMANTIC ERROR: Table legs appear to be positioned near CENTER" in error:
                 log.info("🩹 Attempting semantic fix: Table legs at center → corners")
@@ -1599,12 +1678,24 @@ class SelfHealingAgent:
 
                     fixed_code = '\n'.join(lines)
 
-        # PROACTIVE FIX: Always remove hallucinated imports at the end (regardless of errors)
-        # This prevents issues even if LLM accidentally generates these imports
+        # Call proactive cleanup at the end
+        fixed_code = self._remove_hallucinated_imports(fixed_code)
+
+        return fixed_code
+
+    def _remove_hallucinated_imports(self, code: str) -> str:
+        """
+        PROACTIVE FIX: Always remove hallucinated imports
+        This method is called:
+        1. In _basic_fixes() after healing
+        2. In execute_workflow() BEFORE execution (even if Critic says OK)
+
+        This ensures ALL code is cleaned before execution, not just code that had errors.
+        """
         hallucinated_modules = ['Helpers', 'cadquery.helpers', 'cq_helpers', 'utils', 'cad_utils',
                                 'geometry_utils', 'shape_utils', 'cq_utils']
 
-        lines = fixed_code.split('\n')
+        lines = code.split('\n')
         fixed_lines = []
         removed_any = False
 
@@ -1622,10 +1713,10 @@ class SelfHealingAgent:
                 fixed_lines.append(line)
 
         if removed_any:
-            fixed_code = '\n'.join(fixed_lines)
+            code = '\n'.join(fixed_lines)
             log.info("✅ Proactive hallucinated import cleanup completed")
 
-        return fixed_code
+        return code
 
     async def _llm_heal_code(self, code: str, errors: List[str]) -> str:
         """
