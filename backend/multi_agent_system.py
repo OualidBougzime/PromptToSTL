@@ -1351,48 +1351,64 @@ class SelfHealingAgent:
                 replaced = False
 
                 for line in lines:
-                    # Skip wrong shape creation code
+                    # Check if we should stop skipping (reached export/result/comment section)
+                    if skip_wrong_code:
+                        # Stop skipping when we reach:
+                        # - Empty line
+                        # - Comment starting with #
+                        # - show_object
+                        # - Export section
+                        # - Result assignment that's not shape creation
+                        strip_line = line.strip()
+                        if (not strip_line or
+                            strip_line.startswith('#') or
+                            'show_object' in line or
+                            'Path' in line or
+                            'export' in line or
+                            (strip_line.startswith('result =') and not any(x in line for x in ['.circle(', '.extrude(', 'revolve', '.sweep(']))):
+                            skip_wrong_code = False
+                            # Continue to add this line
+                        else:
+                            # Still in wrong code section - skip it
+                            continue
+
+                    # Detect start of wrong shape creation code
                     if not replaced and ('.circle(' in line or '.extrude(' in line or 'revolve' in line or '.sweep(' in line):
-                        if not skip_wrong_code:
-                            # Get indent
-                            indent_match = re.match(r'(\s*)', line)
-                            indent = indent_match.group(1) if indent_match else ''
+                        # Get indent
+                        indent_match = re.match(r'(\s*)', line)
+                        indent = indent_match.group(1) if indent_match else ''
 
-                            # Insert correct annular sector code
-                            new_lines.append(f'{indent}# Arc annulaire (annular sector) - fixed by SelfHealingAgent')
-                            new_lines.append(f'{indent}import math')
-                            new_lines.append(f'{indent}')
-                            new_lines.append(f'{indent}R_ext = {R_ext}')
-                            new_lines.append(f'{indent}R_int = {R_int}')
-                            new_lines.append(f'{indent}theta_deg = {theta_deg}')
-                            new_lines.append(f'{indent}height = {height}')
-                            new_lines.append(f'{indent}start_deg = {start_deg}')
-                            new_lines.append(f'{indent}')
-                            new_lines.append(f'{indent}th = math.radians(theta_deg)')
-                            new_lines.append(f'{indent}a0 = math.radians(start_deg)')
-                            new_lines.append(f'{indent}a1 = a0 + th')
-                            new_lines.append(f'{indent}')
-                            new_lines.append(f'{indent}def P(R, a):')
-                            new_lines.append(f'{indent}    return (R * math.cos(a), R * math.sin(a))')
-                            new_lines.append(f'{indent}')
-                            new_lines.append(f'{indent}{result_var} = (cq.Workplane("XY")')
-                            new_lines.append(f'{indent}    .moveTo(*P(R_ext, a0))')
-                            new_lines.append(f'{indent}    .threePointArc(P(R_ext, a0 + th/2), P(R_ext, a1))')
-                            new_lines.append(f'{indent}    .lineTo(*P(R_int, a1))')
-                            new_lines.append(f'{indent}    .threePointArc(P(R_int, a0 + th/2), P(R_int, a0))')
-                            new_lines.append(f'{indent}    .close()')
-                            new_lines.append(f'{indent}    .extrude(height)')
-                            new_lines.append(f'{indent})')
-                            log.info(f"🩹 Replaced wrong code with annular sector (R_ext={R_ext}, R_int={R_int}, angle={theta_deg}°)")
-                            replaced = True
-                            skip_wrong_code = True
+                        # Insert correct annular sector code
+                        new_lines.append(f'{indent}# Arc annulaire (annular sector) - fixed by SelfHealingAgent')
+                        new_lines.append(f'{indent}import math')
+                        new_lines.append(f'{indent}')
+                        new_lines.append(f'{indent}R_ext = {R_ext}')
+                        new_lines.append(f'{indent}R_int = {R_int}')
+                        new_lines.append(f'{indent}theta_deg = {theta_deg}')
+                        new_lines.append(f'{indent}height = {height}')
+                        new_lines.append(f'{indent}start_deg = {start_deg}')
+                        new_lines.append(f'{indent}')
+                        new_lines.append(f'{indent}th = math.radians(theta_deg)')
+                        new_lines.append(f'{indent}a0 = math.radians(start_deg)')
+                        new_lines.append(f'{indent}a1 = a0 + th')
+                        new_lines.append(f'{indent}')
+                        new_lines.append(f'{indent}def P(R, a):')
+                        new_lines.append(f'{indent}    return (R * math.cos(a), R * math.sin(a))')
+                        new_lines.append(f'{indent}')
+                        new_lines.append(f'{indent}{result_var} = (cq.Workplane("XY")')
+                        new_lines.append(f'{indent}    .moveTo(*P(R_ext, a0))')
+                        new_lines.append(f'{indent}    .threePointArc(P(R_ext, a0 + th/2), P(R_ext, a1))')
+                        new_lines.append(f'{indent}    .lineTo(*P(R_int, a1))')
+                        new_lines.append(f'{indent}    .threePointArc(P(R_int, a0 + th/2), P(R_int, a0))')
+                        new_lines.append(f'{indent}    .close()')
+                        new_lines.append(f'{indent}    .extrude(height)')
+                        new_lines.append(f'{indent})')
+                        log.info(f"🩹 Replaced wrong code with annular sector (R_ext={R_ext}, R_int={R_int}, angle={theta_deg}°)")
+                        replaced = True
+                        skip_wrong_code = True
                         continue
-                    elif skip_wrong_code and ('.circle(' in line or '.extrude(' in line or 'revolve' in line or 'sweep' in line):
-                        # Skip continuation of wrong code
-                        continue
-                    else:
-                        skip_wrong_code = False
 
+                    # Add line if we're not skipping
                     new_lines.append(line)
                 fixed_code = '\n'.join(new_lines)
 
