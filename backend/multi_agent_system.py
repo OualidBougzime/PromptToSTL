@@ -1314,8 +1314,62 @@ class SelfHealingAgent:
                         new_lines.append(line)
                 fixed_code = '\n'.join(new_lines)
 
+            elif "SEMANTIC ERROR: Prompt asks for ARC" in error:
+                log.info("🩹 Attempting semantic fix: Replace disk revolve with arc 3D (segment de tore)")
+
+                # Extract parameters from prompt/error
+                major_radius = 60  # default
+                minor_radius = 5  # default (pipe thickness)
+                sweep_angle = 210  # default
+
+                import re
+                # Try to extract from error or use defaults
+                radius_match = re.search(r'radius[:\s]*(\d+)', error.lower())
+                angle_match = re.search(r'angle[:\s]*(\d+)', error.lower())
+                if radius_match:
+                    major_radius = int(radius_match.group(1))
+                if angle_match:
+                    sweep_angle = int(angle_match.group(1))
+
+                # Replace incorrect arc code with correct segment de tore pattern
+                lines = fixed_code.split('\n')
+                new_lines = []
+                result_var = 'result'  # default
+
+                # Find the variable name that gets revolve result
+                for line in lines:
+                    if 'revolve' in line.lower():
+                        var_match = re.match(r'(\s*)(\w+)\s*=\s*', line)
+                        if var_match:
+                            result_var = var_match.group(2)
+                        break
+
+                # Rebuild code with correct arc 3D pattern
+                skip_revolve_lines = False
+                for line in lines:
+                    # Skip lines with .circle() followed by .revolve()
+                    if '.circle(' in line and ('revolve' in line or skip_revolve_lines):
+                        skip_revolve_lines = True
+                        # Get indent from original line
+                        indent_match = re.match(r'(\s*)', line)
+                        indent = indent_match.group(1) if indent_match else ''
+
+                        # Insert correct arc 3D code
+                        new_lines.append(f'{indent}# Arc 3D = segment de tore (fixed by SelfHealingAgent)')
+                        new_lines.append(f'{indent}profile = cq.Workplane("XZ").moveTo({major_radius}, 0).circle({minor_radius})')
+                        new_lines.append(f'{indent}{result_var} = profile.revolve({sweep_angle}, (0, 0, 0), (0, 1, 0), clean=False)')
+                        log.info(f"🩹 Replaced disk revolve with arc 3D (major_r={major_radius}, minor_r={minor_radius}, angle={sweep_angle})")
+                        skip_revolve_lines = False
+                        continue
+                    elif skip_revolve_lines and 'revolve' in line:
+                        skip_revolve_lines = False
+                        continue
+
+                    new_lines.append(line)
+                fixed_code = '\n'.join(new_lines)
+
             elif "SEMANTIC ERROR: Prompt asks for CONE but code uses" in error:
-                log.info("🩹 Attempting semantic fix: Replace cylinder with cone loft pattern")
+                log.info("🩹 Attempting semantic fix: Replace cylinder/wrong pattern with cone loft")
 
                 # Extract parameters
                 base_radius = 25  # default
@@ -1329,32 +1383,47 @@ class SelfHealingAgent:
                 if height_match:
                     height = int(height_match.group(1))
 
-                # Replace simple extrude with loft pattern
+                # Replace any wrong pattern with loft
                 lines = fixed_code.split('\n')
                 new_lines = []
-                skip_next = False
-                for i, line in enumerate(lines):
-                    if skip_next:
-                        skip_next = False
-                        continue
+                result_var = 'result'  # default
+                replaced = False
 
-                    if '.circle(' in line and '.extrude(' in line and 'loft' not in fixed_code:
-                        # This is a cylinder - replace with cone
+                # Find the result variable
+                for line in lines:
+                    if '=' in line and ('circle' in line.lower() or 'revolve' in line.lower() or 'extrude' in line.lower()):
                         var_match = re.match(r'(\s*)(\w+)\s*=\s*', line)
                         if var_match:
-                            indent = var_match.group(1)
-                            var_name = var_match.group(2)
+                            result_var = var_match.group(2)
+                        break
+
+                # Rebuild with cone loft pattern
+                skip_shape_creation = False
+                for i, line in enumerate(lines):
+                    # Skip wrong shape creation lines
+                    if not replaced and ('.circle(' in line or '.revolve(' in line or '.extrude(' in line):
+                        if 'loft' not in fixed_code:  # Only replace if no loft exists
+                            indent_match = re.match(r'(\s*)', line)
+                            indent = indent_match.group(1) if indent_match else ''
+
+                            # Insert correct cone code
                             new_lines.append(f'{indent}# Cone via loft (fixed by SelfHealingAgent)')
-                            new_lines.append(f'{indent}{var_name} = (cq.Workplane("XY")')
+                            new_lines.append(f'{indent}{result_var} = (cq.Workplane("XY")')
                             new_lines.append(f'{indent}    .circle({base_radius})')
                             new_lines.append(f'{indent}    .workplane(offset={height})')
                             new_lines.append(f'{indent}    .circle(0.1)')  # Small top radius for cone point
                             new_lines.append(f'{indent}    .loft())')
-                            log.info(f"🩹 Replaced .extrude() with cone loft pattern (base_r={base_radius}, h={height})")
-                        else:
-                            new_lines.append(line)
+                            log.info(f"🩹 Replaced wrong pattern with cone loft (base_r={base_radius}, h={height})")
+                            replaced = True
+                            skip_shape_creation = True
+                            continue
+                    elif skip_shape_creation and ('revolve' in line or 'extrude' in line):
+                        # Skip continuation of wrong pattern
+                        continue
                     else:
-                        new_lines.append(line)
+                        skip_shape_creation = False
+
+                    new_lines.append(line)
                 fixed_code = '\n'.join(new_lines)
 
             # Semantic Fix 1: Table legs positioned at center instead of corners
@@ -1717,6 +1786,11 @@ class CriticAgent:
 
         # Définir les correspondances forme → méthodes requises
         shape_requirements = {
+            'arc': {
+                'required': ['revolve', 'moveTo'],  # Arc 3D = segment de tore (partial revolve)
+                'forbidden': ['.sphere(', '.box('],
+                'error_msg': 'SEMANTIC ERROR: Prompt asks for ARC (3D curved pipe) but code uses {method}. Arc = segment de tore (partial revolve): profile = cq.Workplane("XZ").moveTo(major_r, 0).circle(minor_r); result = profile.revolve(angle, (0,0,0), (0,1,0), clean=False)'
+            },
             'torus': {
                 'required': ['revolve', 'moveTo'],  # Torus = profile.moveTo().circle().revolve()
                 'forbidden': ['.sphere(', '.box(', '.cylinder('],
