@@ -1029,6 +1029,7 @@ class SelfHealingAgent:
         """
         Applique des corrections basiques communes
         """
+        import re  # Import at function start to avoid UnboundLocalError
 
         fixed_code = code
 
@@ -1336,20 +1337,21 @@ class SelfHealingAgent:
                 new_lines = []
                 result_var = 'result'  # default
 
-                # Find the variable name that gets revolve result
+                # Find the variable name that gets shape result (revolve or sweep)
                 for line in lines:
-                    if 'revolve' in line.lower():
+                    if 'revolve' in line.lower() or 'sweep' in line.lower():
                         var_match = re.match(r'(\s*)(\w+)\s*=\s*', line)
                         if var_match:
                             result_var = var_match.group(2)
                         break
 
                 # Rebuild code with correct arc 3D pattern
-                skip_revolve_lines = False
+                skip_shape_lines = False
+                replaced = False
                 for line in lines:
-                    # Skip lines with .circle() followed by .revolve()
-                    if '.circle(' in line and ('revolve' in line or skip_revolve_lines):
-                        skip_revolve_lines = True
+                    # Skip lines with shape creation (.circle + revolve/sweep, or just sweep)
+                    if not replaced and ('.sweep(' in line or ('.circle(' in line and ('revolve' in line or skip_shape_lines))):
+                        skip_shape_lines = True
                         # Get indent from original line
                         indent_match = re.match(r'(\s*)', line)
                         indent = indent_match.group(1) if indent_match else ''
@@ -1358,11 +1360,12 @@ class SelfHealingAgent:
                         new_lines.append(f'{indent}# Arc 3D = segment de tore (fixed by SelfHealingAgent)')
                         new_lines.append(f'{indent}profile = cq.Workplane("XZ").moveTo({major_radius}, 0).circle({minor_radius})')
                         new_lines.append(f'{indent}{result_var} = profile.revolve({sweep_angle}, (0, 0, 0), (0, 1, 0), clean=False)')
-                        log.info(f"🩹 Replaced disk revolve with arc 3D (major_r={major_radius}, minor_r={minor_radius}, angle={sweep_angle})")
-                        skip_revolve_lines = False
+                        log.info(f"🩹 Replaced disk revolve/sweep with arc 3D (major_r={major_radius}, minor_r={minor_radius}, angle={sweep_angle})")
+                        replaced = True
+                        skip_shape_lines = False
                         continue
-                    elif skip_revolve_lines and 'revolve' in line:
-                        skip_revolve_lines = False
+                    elif skip_shape_lines and ('revolve' in line or 'sweep' in line):
+                        skip_shape_lines = False
                         continue
 
                     new_lines.append(line)
