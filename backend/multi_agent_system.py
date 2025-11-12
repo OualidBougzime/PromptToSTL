@@ -1400,8 +1400,8 @@ class SelfHealingAgent:
                 # Rebuild with cone loft pattern
                 skip_shape_creation = False
                 for i, line in enumerate(lines):
-                    # Skip wrong shape creation lines
-                    if not replaced and ('.circle(' in line or '.revolve(' in line or '.extrude(' in line):
+                    # Skip wrong shape creation lines (including .cylinder() hallucination)
+                    if not replaced and ('.circle(' in line or '.revolve(' in line or '.extrude(' in line or '.cylinder(' in line):
                         if 'loft' not in fixed_code:  # Only replace if no loft exists
                             indent_match = re.match(r'(\s*)', line)
                             indent = indent_match.group(1) if indent_match else ''
@@ -1798,7 +1798,7 @@ class CriticAgent:
             },
             'cone': {
                 'required': ['loft', 'circle', 'workplane'],  # Cone = circle + workplane + circle + loft
-                'forbidden': ['.sphere(', '.box('],
+                'forbidden': ['.sphere(', '.box(', '.cylinder('],  # .cylinder() is hallucinated method
                 'allow_cylinder': False,  # Cone ne doit PAS être un simple cylinder
                 'error_msg': 'SEMANTIC ERROR: Prompt asks for CONE but code uses {method}. Use loft pattern: base circle + workplane(offset=height) + top circle + loft()'
             },
