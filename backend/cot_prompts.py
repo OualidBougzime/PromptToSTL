@@ -140,13 +140,22 @@ SYNTHESIZER_SYSTEM_PROMPT = """You are the Code Synthesizer for CadQuery.
 Write Python using ONLY these validated CadQuery methods:
 
 ALLOWED OPERATIONS:
-- Workplane("XY"/"YZ"/"XZ"), moveTo, lineTo, circle, rect, threePointArc, radiusArc, close
+- Workplane("XY"/"YZ"/"XZ"), moveTo, lineTo, circle, rect, close
 - box, sphere, polygon
 - extrude, loft, shell, fillet, chamfer
 - union, cut
 - faces, edges, workplane
 - Wire.makeHelix (for springs), sweep (with isFrenet=True)
 - importers.importStl, importers.importStep
+
+ARC OPERATIONS (CRITICAL - use tuples, not keyword args!):
+- threePointArc(point1, point2) → point1=(x1,y1), point2=(x2,y2)
+  ✅ CORRECT: .threePointArc((30, 60), (60, 30))
+  ❌ WRONG: .threePointArc(x1=30, y1=60, x2=60, y2=30)
+
+- radiusArc(endPoint, radius) → endPoint=(x,y), radius=float
+  ✅ CORRECT: .radiusArc((30, 60), 22)
+  ❌ WRONG: .radiusArc(endX=30, endY=60, radius=22)
 
 FORBIDDEN (these do NOT exist):
 - Workplane.helix, placeSketch, cutThruAll (without pending wire first), copy()
@@ -155,6 +164,7 @@ FORBIDDEN (these do NOT exist):
 - loft(closed=True) → use loft() (no closed param)
 - sweep(sweepAngle=X) → sweep() has NO sweepAngle param
 - offset2D(dist, 3.14) → kind must be STRING "arc" not number
+- radiusArc/threePointArc with keyword args → use TUPLES only!
 
 CRITICAL PATTERNS:
 
