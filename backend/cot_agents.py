@@ -342,7 +342,7 @@ class ArchitectAgent:
         system_prompt = ARCHITECT_SYSTEM_PROMPT
 
         messages = [
-            {"role": "system", "content": system_prompt_with_examples},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Analyze this CAD request: {prompt}"}
         ]
 
@@ -482,7 +482,7 @@ class PlannerAgent:
         system_prompt = PLANNER_SYSTEM_PROMPT
 
         messages = [
-            {"role": "system", "content": system_prompt_with_examples},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"""Create a construction plan for:
 Description: {analysis.description}
 Primitives needed: {', '.join(analysis.primitives_needed)}
