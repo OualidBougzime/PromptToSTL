@@ -1,0 +1,53 @@
+{
+  "description": "Liste des prompts CAD à exécuter automatiquement",
+  "prompts": [
+    {
+      "id": 1,
+      "name": "Table",
+      "enabled": true,
+      "prompt": "Create a table: make a rectangular top 200 mm × 100 mm × 15 mm, add four cylindrical legs diameter 12 mm height 120 mm inset 15 mm from each corner under the top, and union all parts."
+    },
+    {
+      "id": 2,
+      "name": "Vase",
+      "enabled": true,
+      "prompt": "Create a vase by revolving a smooth profile with radius 30 mm at base, 22 mm at mid-height 60 mm, and 35 mm at top height 120 mm, then shell to 3 mm wall thickness and keep a flat 3 mm bottom."
+    },
+    {
+      "id": 3,
+      "name": "Drinking Glass",
+      "enabled": true,
+      "prompt": "Create a drinking glass: make an outer cylinder radius 35 mm height 100 mm, subtract an inner cylinder radius 32.5 mm height 92 mm to leave an 8 mm solid bottom, then fillet the rim 1 mm."
+    },
+    {
+      "id": 4,
+      "name": "Helical Spring",
+      "enabled": true,
+      "prompt": "Create a helical spring by sweeping a circle radius 1.5 mm along a right-hand helix with major radius 20 mm, pitch 8 mm, and 10 turns, then trim both ends flat."
+    },
+    {
+      "id": 5,
+      "name": "Pipe",
+      "enabled": true,
+      "prompt": "Create a pipe by subtracting an inner cylinder radius 15 mm length 150 mm from an outer cylinder radius 20 mm length 150 mm, then optionally chamfer both rim edges 1 mm."
+    },
+    {
+      "id": 6,
+      "name": "Hemispherical Bowl",
+      "enabled": true,
+      "prompt": "Create a hemispherical bowl by revolving a semicircle radius 40 mm to form a hemisphere, then shell to 3 mm wall thickness while keeping a 3 mm bottom and fillet the rim 1 mm."
+    },
+    {
+      "id": 7,
+      "name": "Screw",
+      "enabled": true,
+      "prompt": "Create a screw: make a cylindrical shaft radius 4 mm height 50 mm, place a hexagonal head circumradius 6 mm height 5 mm on top, and union the head and shaft (optional 0.5 mm chamfer on head edges)."
+    },
+    {
+      "id": 8,
+      "name": "Stanford Bunny",
+      "enabled": true,
+      "prompt": "Create the Stanford Bunny mesh, scale to overall height 70 mm, fix non-manifold edges and unify normals, then remesh to about 18 000 triangles."
+    }
+  ]
+}
