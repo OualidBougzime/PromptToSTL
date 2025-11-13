@@ -181,6 +181,51 @@ Ouvrez `http://localhost:3000` dans votre navigateur.
 }
 ```
 
+### 🚀 Batch Runner - Exécution Automatique
+
+Exécutez automatiquement plusieurs prompts CAD avec logs et sauvegarde des résultats :
+
+```bash
+# Méthode simple (recommandée)
+./run_batch.sh
+
+# Ou directement avec Python
+python3 batch_runner.py
+
+# Avec fichier de prompts personnalisé
+python3 batch_runner.py mes_prompts.json
+```
+
+**Fonctionnalités** :
+- ✅ Exécution séquentielle de tous les prompts
+- 📝 Logs complets pour chaque prompt
+- 💾 Sauvegarde du code Python généré
+- 📊 Rapport JSON avec résultats et métriques
+- ⏱️ Mesure du temps d'exécution
+
+**Personnalisation** : Éditez `prompts.json` pour ajouter vos propres prompts :
+
+```json
+{
+  "prompts": [
+    {
+      "id": 1,
+      "name": "Mon Objet",
+      "enabled": true,
+      "prompt": "Create a custom object..."
+    }
+  ]
+}
+```
+
+**Résultats** : Tous les fichiers sont sauvegardés dans `batch_results/` :
+- `batch_run_*.log` - Logs d'exécution complets
+- `batch_results_*.json` - Résultats structurés avec tous les détails
+- `prompt_*_code.py` - Code Python généré pour chaque prompt
+- Fichiers STL dans `backend/output/`
+
+Voir [BATCH_README.md](BATCH_README.md) pour la documentation complète.
+
 ## Performance
 
 | Type | Temps | Coût | Mode |
