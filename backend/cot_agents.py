@@ -13,6 +13,14 @@ import logging
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 
+# Import improved system prompts
+from cot_prompts import (
+    ARCHITECT_SYSTEM_PROMPT,
+    PLANNER_SYSTEM_PROMPT,
+    SYNTHESIZER_SYSTEM_PROMPT,
+    FEW_SHOT_EXAMPLES
+)
+
 log = logging.getLogger("cadamx.cot_agents")
 
 
@@ -330,59 +338,11 @@ class ArchitectAgent:
 
         log.info(f"🏗️ Analyzing: {prompt[:100]}...")
 
-        system_prompt = """You are an expert CAD architect specialized in 3D modeling with CadQuery.
-
-Your role: Analyze user requests and decompose them into geometric primitives and operations.
-
-SHAPE RECOGNITION (CRITICAL - Learn these patterns):
-- **ARC** (with radius + sweep angle) = ANNULAR SECTOR (portion de couronne / pie slice)
-  → Description: "An annular sector with outer radius R, sweep angle A degrees"
-  → Primitives: threePointArc, lineTo, close, extrude
-  → NOT a swept cylinder! NOT revolve! It's a 2D arc profile extruded!
-
-- **TORUS** (major radius + minor radius) = Revolved circular profile
-  → Description: "A torus with major radius R_major and minor radius R_minor"
-  → Primitives: circle, revolve
-
-- **CONE** (base diameter + height) = Loft between two circles
-  → Description: "A cone with base diameter D and height H"
-  → Primitives: circle, workplane, loft
-
-- **CYLINDER** (radius + height) = Circle extruded
-  → Description: "A cylinder with radius R and height H"
-  → Primitives: circle, extrude
-
-ANALYSIS PROCESS (think step by step):
-1. IDENTIFY the shape: What exactly is the user asking for? Check SHAPE RECOGNITION above!
-2. PRIMITIVES: What basic shapes are needed? (box, cylinder, sphere, cone, torus, polygon, arc, etc.)
-3. OPERATIONS: What transformations? (extrude, revolve, loft, sweep, fillet, chamfer, union, cut, etc.)
-4. SEQUENCE: In what order should operations be applied?
-5. PARAMETERS: Extract ALL numeric values from the prompt (dimensions, angles, counts, etc.)
-
-Output your analysis in this JSON format:
-{
-  "description": "Brief description of the shape",
-  "primitives_needed": ["primitive1", "primitive2"],
-  "operations_sequence": ["step1", "step2", "step3"],
-  "parameters": {"param1": value1, "param2": value2},
-  "complexity": "simple|medium|complex",
-  "reasoning": "Your step-by-step reasoning"
-}
-
-CRITICAL RULES FOR VALID JSON:
-- ALL parameter values MUST be actual numbers, NOT the word "value"
-- Calculate ALL math expressions (e.g., 45*30=1350) and use the result
-- Use concrete numeric values, estimate reasonable defaults
-- NO variable names, NO placeholders, NO expressions
-- ONLY use: strings, numbers, arrays, objects, true, false, null
-
-GOOD: "parameters": {"radius": 25, "height": 50}
-BAD:  "parameters": {"radius": value, "height": value}
-BAD:  "parameters": {"angle": 45 * 30}
-"""
+        # Use improved system prompt from cot_prompts.py
+        system_prompt = ARCHITECT_SYSTEM_PROMPT
 
         messages = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": system_prompt_with_examples},
             {"role": "user", "content": f"Analyze this CAD request: {prompt}"}
         ]
 
@@ -518,73 +478,11 @@ class PlannerAgent:
 
         log.info(f"📐 Planning: {analysis.description}")
 
-        system_prompt = """You are a CAD construction planner specialized in CadQuery workflows.
-
-Your role: Transform architectural analysis into a precise, executable construction plan.
-
-PLANNING PRINCIPLES:
-1. START SIMPLE: Begin with basic workplane and primitives
-2. BUILD UP: Add complexity progressively (2D → 3D → modifications → patterns)
-3. BE SPECIFIC: Every parameter must have a concrete numeric value
-4. THINK 3D: Consider which plane (XY, XZ, YZ) is best for each operation
-
-CADQUERY OPERATIONS REFERENCE:
-
-WORKPLANES & PRIMITIVES:
-- Workplane(plane): Create workplane → plane: "XY"|"XZ"|"YZ"
-- box(length, width, height): Solid box
-- sphere(radius): Solid sphere
-- circle(radius): 2D circle (needs extrude/revolve for 3D)
-- rect(width, height): 2D rectangle
-- polygon(nSides, diameter): Regular polygon (hexagon: nSides=6)
-
-3D OPERATIONS:
-- extrude(distance): Extrude 2D → 3D
-- revolve(angleDegrees, axisStart, axisEnd): Revolve around axis (angle is POSITIONAL!)
-- loft(): Loft between multiple 2D profiles
-- sweep(path): Sweep profile along path
-
-MODIFICATIONS:
-- fillet(radius): Round edges
-- chamfer(length): Chamfer edges
-- shell(thickness): Hollow out solid
-
-BOOLEAN OPERATIONS:
-- union(shape): Add shapes together
-- cut(shape): Subtract shape
-- intersect(shape): Keep only intersection
-- cutThruAll(): Cut through entire solid
-- cutBlind(depth): Cut to specific depth
-
-PATTERNS:
-- polarArray(radius, startAngle, angle, count): Circular pattern
-- rarray(xSpacing, ySpacing, xCount, yCount): Rectangular array
-
-SELECTION:
-- faces(selector): Select faces → ">Z" (top), "<Z" (bottom), "|Z" (vertical)
-- edges(selector): Select edges → "|Z" (parallel to Z), "#Z" (perpendicular)
-- vertices(): Select vertices
-
-Output JSON format:
-{
-  "steps": [
-    {"operation": "Workplane", "parameters": {"plane": "XY"}, "description": "Create base plane"},
-    {"operation": "box", "parameters": {"length": 50, "width": 50, "height": 50}, "description": "Create main body"}
-  ],
-  "variables": {"main_size": 50, "detail_size": 10},
-  "constraints": ["All dimensions positive", "Feature size > 1mm"],
-  "estimated_complexity": 3
-}
-
-CRITICAL RULES FOR VALID JSON:
-- ALL values MUST be actual numbers, NOT "value" or variables
-- Calculate ALL math expressions (e.g., 45*30=1350)
-- Use concrete numeric values
-- NO expressions in JSON, NO placeholders
-"""
+        # Use improved system prompt from cot_prompts.py
+        system_prompt = PLANNER_SYSTEM_PROMPT
 
         messages = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": system_prompt_with_examples},
             {"role": "user", "content": f"""Create a construction plan for:
 Description: {analysis.description}
 Primitives needed: {', '.join(analysis.primitives_needed)}
@@ -718,403 +616,23 @@ class CodeSynthesizerAgent:
 
         log.info(f"🧠 Using full LLM pipeline (Fast-path disabled)")
 
-        system_prompt = """You are an expert CadQuery code generator with deep knowledge of the CadQuery Python library.
+        # Use improved system prompt from cot_prompts.py
+        system_prompt = SYNTHESIZER_SYSTEM_PROMPT
 
-Your mission: Transform the construction plan into WORKING, EXECUTABLE CadQuery code.
+        # Add few-shot example if relevant object type detected
+        few_shot_hint = ""
+        object_type = analysis.description.lower()
+        for key in FEW_SHOT_EXAMPLES.keys():
+            if key in object_type:
+                few_shot_hint = f"\n\nREFERENCE PATTERN FOR {key.upper()}:\n```python\n{FEW_SHOT_EXAMPLES[key]}\n```\n"
+                log.info(f"📚 Using few-shot example for: {key}")
+                break
 
-🚨 CRITICAL WARNING - READ THIS FIRST 🚨
-===========================================
-CadQuery does NOT have a .torus() method!
-If you need a TORUS, you MUST use the revolve pattern shown below.
-NEVER write: result = cq.Workplane("XY").torus(...)  ← THIS WILL CRASH!
-ALWAYS write: profile = cq.Workplane("XZ").moveTo(major_r, 0).circle(minor_r)
-             result = profile.revolve(360, (0, 0, 0), (0, 1, 0))
+        system_prompt_with_examples = system_prompt + few_shot_hint
 
-CODE QUALITY REQUIREMENTS:
-1. CORRECTNESS: Code must execute without errors
-2. COMPLETENESS: Must include imports, creation, and export
-3. CLARITY: Use descriptive variable names and comments for complex operations
-4. EFFICIENCY: Chain operations when possible using method chaining
-
-=== CRITICAL: CADQUERY API REFERENCE ===
-Only use these VALIDATED methods (hallucinating non-existent methods causes failures!):
-
-✅ VALID METHODS:
-- box(length, width, height): Create a box
-- sphere(radius): Create a sphere
-- circle(radius).extrude(height): Cylinder
-- polygon(nSides, diameter): Regular polygon (hexagon: nSides=6)
-- rect(width, height): Rectangle
-- extrude(distance): Extrude 2D to 3D
-- revolve([angleDegrees]): Revolve (angle is POSITIONAL, not kwarg!)
-- loft(): Loft between sections (no 'closed' parameter)
-- fillet(radius), chamfer(length): Edge modifications
-- cutThruAll(), cutBlind(depth): Cut operations
-- union(shape), intersect(shape): Boolean operations
-- faces(">Z"), edges("|Z"): Selection
-- workplane(offset=z): New workplane
-- polarArray(r, start, angle, count): Circular pattern
-- moveTo(x, y): Move to position (used for torus profile)
-
-❌ THESE DO NOT EXIST (common hallucinations):
-- .torus(major, minor) → DOES NOT EXIST! Use revolve pattern below
-- .cone() → DOES NOT EXIST! Use circle+loft pattern
-- .cylinder() → DOES NOT EXIST! Use circle+extrude
-- .regularPolygon() → Use .polygon()
-- revolve(angle=X) → Use revolve(X) positional
-- loft(closed=True) → No 'closed' param
-- cut() without argument → Use cutThruAll()
-- sweep(sweepAngle=X) → sweep() has NO sweepAngle param! Use sagittaArc/threePointArc
-- offset2D(dist, 3.14) → kind must be STRING "arc" not number
-
-🚨 MANDATORY TORUS PATTERN (NO .torus() METHOD EXISTS!):
-========================================================
-For a torus with major_radius=40, minor_radius=10:
-
-✅ CORRECT (ONLY WAY THAT WORKS):
-```python
-import cadquery as cq
-# Create circular profile on XZ plane at major radius distance
-profile = cq.Workplane("XZ").moveTo(40, 0).circle(10)
-# Revolve 360° around Y-axis to create torus
-# CRITICAL: clean=False is REQUIRED for 360° revolves to prevent BRep_API errors
-result = profile.revolve(360, (0, 0, 0), (0, 1, 0), clean=False)
-```
-
-🚨 CRITICAL REVOLVE RULES:
-- For 360° revolves (full circles): ALWAYS use clean=False
-- For partial revolves (<360°): clean=True is optional
-- Missing clean=False causes "BRep_API: command not done" on torus/cylinder
-
-❌ WRONG (THIS WILL CRASH - NO .torus() METHOD):
-```python
-result = cq.Workplane("XY").torus(40, 10)  # AttributeError!
-result = cq.Workplane().torus(...)  # AttributeError!
-result = profile.revolve(360, (0, 0, 0), (0, 1, 0))  # ❌ Missing clean=False!
-```
-
-⚠️ Important: MUST use XZ plane (not XY) for Y-axis revolve, or you get "No pending wires" error!
-
-🚨 ULTRA-SPECIFIC SHAPE PATTERNS (MUST FOLLOW EXACTLY!) 🚨
-=================================================================
-
-### TORUS (major radius R, minor radius r):
-```python
-# ✅ CORRECT - ONLY way that works:
-import cadquery as cq
-profile = cq.Workplane("XZ").moveTo(50, 0).circle(8)  # Profile at major_r=50, minor_r=8
-result = profile.revolve(360, (0, 0, 0), (0, 1, 0), clean=False)
-
-# ❌ WRONG - DO NOT USE:
-result = cq.Workplane("XY").sphere(50)  # This is SPHERE not TORUS!
-result = cq.Workplane("XY").torus(50, 8)  # .torus() DOES NOT EXIST!
-result = profile.sweep(path)  # sweep() needs Wire/Edge, not for simple torus
-```
-
-### CONE (base diameter D, height H):
-```python
-# ✅ CORRECT - Use loft between two circles:
-import cadquery as cq
-base_radius = 25  # diameter 50 / 2
-result = (cq.Workplane("XY")
-    .circle(base_radius)           # Base circle
-    .workplane(offset=60)          # Height 60
-    .circle(0.1)                   # Small top (point) - NOT zero!
-    .loft())                       # Loft to create cone
-
-# ❌ WRONG - DO NOT USE:
-result = cq.Workplane("XY").circle(25).extrude(60)  # This is CYLINDER not CONE!
-result = cq.Workplane("XY").cone(25, 60)  # .cone() DOES NOT EXIST!
-```
-
-### CYLINDER (diameter D, height H):
-```python
-# ✅ CORRECT - Use circle + extrude:
-import cadquery as cq
-radius = 20  # diameter 40 / 2
-result = cq.Workplane("XY").circle(radius).extrude(60)
-
-# ❌ WRONG - DO NOT USE:
-result = cq.Workplane("XY").cylinder(20, 60)  # .cylinder() DOES NOT EXIST!
-```
-
-### ARC - Annular Sector (portion de couronne / annular segment) - DEFAULT for "arc":
-```python
-# ✅ CORRECT - Arc = Annular sector (portion de couronne entre 2 rayons)
-import cadquery as cq
-import math
-
-# Arc annulaire : portion de couronne circulaire
-R_ext = 60        # Rayon extérieur (outer radius)
-R_int = 50        # Rayon intérieur (inner radius) - use 0 for solid sector
-theta_deg = 210   # Angle de balayage (sweep angle in degrees)
-height = 10       # Épaisseur d'extrusion (extrusion height)
-start_deg = 0     # Angle de départ (start angle, default 0)
-
-th = math.radians(theta_deg)
-a0 = math.radians(start_deg)
-a1 = a0 + th
-
-def P(R, a):  # Polar to cartesian
-    return (R * math.cos(a), R * math.sin(a))
-
-# Closed 2D profile: outer arc → radial line → inner arc → radial line back
-result = (cq.Workplane("XY")
-    .moveTo(*P(R_ext, a0))
-    .threePointArc(P(R_ext, a0 + th/2), P(R_ext, a1))  # Outer arc
-    .lineTo(*P(R_int, a1))                              # Radial side
-    .threePointArc(P(R_int, a0 + th/2), P(R_int, a0))  # Inner arc
-    .close()
-    .extrude(height)
-)
-
-# ⚠️ IMPORTANT: This creates a "pie slice" or "annular segment" shape
-# Like a portion of a ring/donut viewed from above (2D extruded)
-
-# ❌ WRONG - These create wrong shapes:
-result = cq.Workplane("XY").circle(60).extrude(10)  # Creates full cylinder, not arc sector!
-result = profile.revolve(210, (0,0,0), (0,1,0))     # Creates 3D curved pipe (torus segment), not annular sector!
-```
-
-### ARC - 3D Curved Pipe (segment de tore) - ONLY if "curved pipe" or "3D arc" explicitly mentioned:
-```python
-# Arc 3D = segment de tore (partial torus) for curved pipe applications
-import cadquery as cq
-
-major_radius = 60  # Distance from center to arc centerline
-minor_radius = 5   # Pipe thickness (radius of circular cross-section)
-sweep_angle = 210  # Degrees of arc (< 360 for partial torus)
-
-profile = cq.Workplane("XZ").moveTo(major_radius, 0).circle(minor_radius)
-result = profile.revolve(sweep_angle, (0, 0, 0), (0, 1, 0), clean=False)
-```
-
-🚨 CRITICAL RULES TO AVOID ERRORS:
-1. TORUS: ALWAYS use revolve pattern with XZ plane + moveTo + clean=False
-2. CONE: ALWAYS use loft (NOT extrude) with two circles of different radii
-3. CYLINDER: ALWAYS use circle + extrude (NOT loft with same radii)
-4. ARC: DEFAULT = annular sector (portion de couronne) with threePointArc + lineTo + close + extrude
-   - Use polar coordinates: P(R, angle) = (R*cos(a), R*sin(a))
-   - NOT just circle().extrude() (makes full cylinder, not arc sector!)
-5. SPHERE: ONLY use .sphere() method (NOT revolve)
-6. polarArray/rarray count: MUST be integer, not float (use int(4) not 4.0)
-7. offset2D kind: MUST be string "arc" or "intersection", NOT a number
-8. sweep(): NEVER use sweepAngle parameter (doesn't exist!)
-
-Cone/Frustum:
-```python
-result = (cq.Workplane("XY")
-    .circle(40)
-    .workplane(offset=80)
-    .circle(10)
-    .loft())
-```
-
-Hexagon:
-```python
-result = cq.Workplane("XY").polygon(6, 30).extrude(15)
-```
-
-Gear (simplified):
-```python
-import cadquery as cq
-result = (cq.Workplane("XY")
-    .circle(20)
-    .extrude(10)
-    .faces(">Z")
-    .circle(4)
-    .cutThruAll())
-# Add teeth using polarArray
-result = (result.faces(">Z")
-    .workplane()
-    .polarArray(18, 0, 360, 20)
-    .rect(2, 3)
-    .extrude(2))
-```
-
-🚨 COMMON SEMANTIC ERRORS AND CORRECT PATTERNS 🚨
-===================================================
-These are REAL-WORLD examples of semantic errors - code that compiles but doesn't match user intent.
-
-❌ ERROR #1: TABLE WITH LEGS AT CENTER (WRONG!)
-Problem: Legs positioned near center (95,45) instead of corners
-```python
-# ❌ WRONG: Legs too close to center
-table_top = cq.Workplane("XY").box(200, 100, 5)
-leg1 = cq.Workplane("XY").moveTo(95, 45).circle(5).extrude(-50)  # TOO CLOSE TO CENTER!
-leg2 = cq.Workplane("XY").moveTo(105, 45).circle(5).extrude(-50)
-```
-
-✅ CORRECT: Position legs at CORNERS with proper spacing
-```python
-# ✅ CORRECT: Legs at corners
-import cadquery as cq
-table_width = 200
-table_depth = 100
-leg_inset = 10  # Distance from edge
-
-table_top = cq.Workplane("XY").box(table_width, table_depth, 5).translate((0, 0, 50))
-
-# Calculate corner positions: ±(width/2 - inset), ±(depth/2 - inset)
-x_offset = table_width / 2 - leg_inset  # = 90
-y_offset = table_depth / 2 - leg_inset  # = 40
-
-leg_positions = [
-    (x_offset, y_offset),      # Front right: (90, 40)
-    (-x_offset, y_offset),     # Front left: (-90, 40)
-    (x_offset, -y_offset),     # Back right: (90, -40)
-    (-x_offset, -y_offset)     # Back left: (-90, -40)
-]
-
-result = table_top
-for x, y in leg_positions:
-    leg = cq.Workplane("XY").center(x, y).circle(5).extrude(-50)
-    result = result.union(leg)
-```
-
-❌ ERROR #2: HOLLOW PIPE WITHOUT cut() (SOLID INSTEAD!)
-Problem: Prompt says "hollow pipe" but code has no cut/shell operation
-```python
-# ❌ WRONG: Creates SOLID cylinder, not hollow pipe!
-result = cq.Workplane("XY").circle(20).extrude(100)  # SOLID!
-```
-
-✅ CORRECT: Use cut() or shell() to make it hollow
-```python
-# ✅ CORRECT: Hollow pipe using cut()
-import cadquery as cq
-outer_radius = 20
-inner_radius = 15
-height = 100
-
-outer = cq.Workplane("XY").circle(outer_radius).extrude(height)
-inner = cq.Workplane("XY").circle(inner_radius).extrude(height)
-result = outer.cut(inner)  # Subtract inner to create hollow
-```
-
-OR using shell() (alternative method):
-```python
-# ✅ CORRECT: Hollow pipe using shell()
-result = (cq.Workplane("XY")
-    .circle(20)
-    .extrude(100)
-    .faces(">Z")
-    .shell(-5))  # Wall thickness = 5mm
-```
-
-❌ ERROR #3: VASE WITH loft() THEN revolve() (IMPOSSIBLE!)
-Problem: loft() creates 3D solid - cannot revolve a solid
-```python
-# ❌ WRONG: Can't revolve after loft (loft creates 3D solid!)
-base = cq.Workplane("XY").circle(30)
-top = cq.Workplane("XY", offset=100).circle(20)
-vase = base.loft()  # Creates 3D solid
-result = vase.revolve(360)  # ❌ CAN'T REVOLVE A SOLID!
-```
-
-✅ CORRECT: Use ONLY revolve() with varying radius profile
-```python
-# ✅ CORRECT: Vase using revolve with profile
-import cadquery as cq
-
-# Create profile path for vase shape on XZ plane
-profile = (cq.Workplane("XZ")
-    .moveTo(30, 0)      # Bottom outer radius
-    .lineTo(25, 50)     # Taper inward
-    .lineTo(20, 100)    # Top radius
-    .lineTo(17, 100)    # Inner wall top
-    .lineTo(27, 0)      # Inner wall bottom
-    .close())           # Close the profile
-
-result = profile.revolve(360, (0, 0, 0), (0, 1, 0), clean=False)
-```
-
-OR for simple tapered vase:
-```python
-# ✅ CORRECT: Simple tapered vase with shell()
-outer = (cq.Workplane("XY")
-    .circle(30)
-    .workplane(offset=100)
-    .circle(20)
-    .loft())
-
-result = outer.faces(">Z").shell(-3)  # 3mm wall thickness
-```
-
-❌ ERROR #4: BOWL WITHOUT HOLLOW (SOLID HEMISPHERE!)
-Problem: Bowl should be hollow but code creates solid
-```python
-# ❌ WRONG: Solid hemisphere, not a bowl!
-result = cq.Workplane("XY").sphere(50).faces(">Z").workplane().split(keepTop=True)
-```
-
-✅ CORRECT: Bowl with shell() or cut()
-```python
-# ✅ CORRECT: Hollow bowl using shell()
-import cadquery as cq
-radius = 50
-wall_thickness = 3
-
-sphere = cq.Workplane("XY").sphere(radius)
-# Cut away top half to create bowl shape
-bowl = sphere.faces("<Z").workplane(-radius).split(keepBottom=True)
-# Make it hollow
-result = bowl.faces(">Z").shell(wall_thickness)
-```
-
-OR using two spheres:
-```python
-# ✅ CORRECT: Hollow bowl using cut()
-outer_sphere = cq.Workplane("XY").sphere(50)
-inner_sphere = cq.Workplane("XY").sphere(47)  # 3mm wall
-outer_half = outer_sphere.faces("<Z").workplane().split(keepBottom=True)
-inner_half = inner_sphere.faces("<Z").workplane().split(keepBottom=True)
-result = outer_half.cut(inner_half)
-```
-
-KEY LESSONS:
-1. For furniture (tables, chairs): Position elements at EDGES/CORNERS, not center
-   - Calculate: ±(total_width/2 - inset_from_edge)
-2. For hollow objects (pipes, tubes, containers): ALWAYS use .cut() or .shell()
-3. For vases/bottles: Use revolve() with CLOSED profile, NOT loft()+revolve()
-4. For bowls/cups: Create outer shape then use .shell() or subtract inner shape
-5. Verify coordinates make geometric sense (e.g., legs at ±90 not ±5 for 200mm table)
-
-CRITICAL SUCCESS RULES:
-1. ✅ ALWAYS import: import cadquery as cq
-2. ✅ Create 3D solid BEFORE cut/union (extrude/revolve/loft required first)
-3. ✅ revolve() angle is POSITIONAL: revolve(360) NOT revolve(angle=360)
-4. ✅ Use cutThruAll() not cut() for through-holes
-5. ✅ Chain operations fluently: .method1().method2().method3()
-6. ✅ Final shape MUST be assigned to: result = ...
-7. ✅ TORUS: Profile on XZ plane for Y-axis revolve (NOT XY!)
-8. ✅ Add export at the end (template provided below)
-
-COMMON ERROR PATTERNS TO AVOID:
-❌ NO: .torus(major, minor) → ✅ YES: Use revolve pattern
-❌ NO: .cone(r1, r2, h) → ✅ YES: Use circle+loft
-❌ NO: revolve(angle=360) → ✅ YES: revolve(360)
-❌ NO: .cut() with no argument → ✅ YES: .cutThruAll()
-❌ NO: loft(closed=True) → ✅ YES: loft() (no closed param)
-
-CODE STRUCTURE TEMPLATE:
-```python
-import cadquery as cq
-from pathlib import Path
-
-# Build the shape (your code here)
-result = cq.Workplane("XY")...
-
-# Export to STL
-output_dir = Path(__file__).parent / "output"
-output_dir.mkdir(exist_ok=True)
-output_path = output_dir / "generated_cot_generated.stl"
-cq.exporters.export(result, str(output_path))
-print(f"✅ STL exported to: {output_path}")
-```
-
-Output ONLY the complete Python code following the template above.
-"""
+        # ==================================================================
+        # Old huge system prompt removed - now using improved version from cot_prompts.py
+        # ==================================================================
 
         plan_text = json.dumps({
             "steps": plan.steps,
@@ -1123,7 +641,7 @@ Output ONLY the complete Python code following the template above.
         }, indent=2)
 
         messages = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": system_prompt_with_examples},
             {"role": "user", "content": f"""Generate CadQuery code for:
 Description: {analysis.description}
 Primitives: {', '.join(analysis.primitives_needed)}

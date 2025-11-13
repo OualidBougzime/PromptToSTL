@@ -1926,9 +1926,18 @@ class CriticAgent:
     - Objets censés être creux mais sans cut()/shell()
     - Conflits de workflow (loft() + revolve())
     - Dimensions incohérentes ou espacements incorrects
+    - Mauvaise forme générée (torus vs sphere, cone vs cylinder, etc.)
     """
 
     def __init__(self):
+        # Import critic rules from cot_prompts
+        try:
+            from cot_prompts import CRITIC_RULES
+            self.critic_rules = CRITIC_RULES
+        except ImportError:
+            log.warning("⚠️ Could not import CRITIC_RULES from cot_prompts")
+            self.critic_rules = {}
+
         log.info("🔍 CriticAgent initialized")
 
     async def critique_code(self, code: str, prompt: str) -> AgentResult:
@@ -1946,6 +1955,23 @@ class CriticAgent:
         if shape_mismatch:
             issues.append(shape_mismatch)
 
+        # Analyse 0b : Vérifications spécifiques par type d'objet
+        glass_issue = self._check_glass_pattern(code, prompt)
+        if glass_issue:
+            issues.append(glass_issue)
+
+        spring_issue = self._check_spring_pattern(code, prompt)
+        if spring_issue:
+            issues.append(spring_issue)
+
+        vase_issue = self._check_vase_pattern(code, prompt)
+        if vase_issue:
+            issues.append(vase_issue)
+
+        pipe_issue = self._check_pipe_pattern(code, prompt)
+        if pipe_issue:
+            issues.append(pipe_issue)
+
         # Analyse 1 : Tables avec pieds mal positionnés
         if any(keyword in prompt.lower() for keyword in ["table", "desk", "stand"]):
             leg_issue = self._check_table_legs(code, prompt)
@@ -1953,7 +1979,7 @@ class CriticAgent:
                 issues.append(leg_issue)
 
         # Analyse 2 : Objets creux
-        if any(keyword in prompt.lower() for keyword in ["hollow", "creux", "pipe", "tube", "vase", "bowl", "cup", "container"]):
+        if any(keyword in prompt.lower() for keyword in ["hollow", "creux", "pipe", "tube", "vase", "bowl", "cup", "container", "glass"]):
             hollow_issue = self._check_hollow_object(code, prompt)
             if hollow_issue:
                 issues.append(hollow_issue)
@@ -1972,6 +1998,11 @@ class CriticAgent:
         revolve_issue = self._check_revolve_axis(code)
         if revolve_issue:
             warnings.append(revolve_issue)
+
+        # Analyse 6 : Vérification des méthodes halluc inées
+        hallucination_issue = self._check_hallucinated_methods(code)
+        if hallucination_issue:
+            issues.append(hallucination_issue)
 
         if issues:
             log.warning(f"🔍 Critic found {len(issues)} semantic issue(s)")
@@ -2203,6 +2234,120 @@ class CriticAgent:
                 if 'Workplane("XY")' in code:
                     return (f"WARNING: Y-axis revolve detected with XY workplane. "
                            f"Consider using XZ workplane for Y-axis revolve to avoid issues.")
+
+        return None
+
+    def _check_glass_pattern(self, code: str, prompt: str) -> Optional[str]:
+        """
+        Vérifie le pattern spécifique pour un verre (glass)
+        """
+        prompt_lower = prompt.lower()
+        if "glass" not in prompt_lower and "drinking" not in prompt_lower:
+            return None
+
+        # Glass = outer cylinder + inner cut from top + fillet rim
+        # MUST have: circle().extrude() for outer, then faces(">Z").workplane().circle().extrude(-depth)
+        if ".circle(" not in code or ".extrude(" not in code:
+            return "SEMANTIC ERROR: Glass needs .circle().extrude() pattern"
+
+        # Check for hollow structure
+        if ".cut(" not in code and "shell(" not in code and "extrude(-" not in code:
+            return "SEMANTIC ERROR: Glass must be hollow (needs inner cut with negative extrude)"
+
+        # Check rim fillet
+        if "fillet" in prompt_lower and ".fillet(" not in code:
+            return "SEMANTIC ERROR: Prompt mentions fillet but code missing .fillet()"
+
+        return None
+
+    def _check_spring_pattern(self, code: str, prompt: str) -> Optional[str]:
+        """
+        Vérifie le pattern spécifique pour un ressort (spring)
+        """
+        prompt_lower = prompt.lower()
+        if "spring" not in prompt_lower and "helix" not in prompt_lower:
+            return None
+
+        # Spring = Wire.makeHelix + sweep
+        # MUST NOT use: Workplane.helix() (doesn't exist)
+        if ".helix(" in code and "Wire.makeHelix" not in code:
+            return "SEMANTIC ERROR: Workplane.helix() doesn't exist. Use Wire.makeHelix(pitch, height, radius)"
+
+        # MUST have sweep
+        if "sweep" not in code:
+            return "SEMANTIC ERROR: Spring needs sweep() to follow helix path"
+
+        # Check isFrenet parameter
+        if "sweep(" in code and "isFrenet" not in code:
+            return "SEMANTIC ERROR: Spring sweep should use isFrenet=True for proper orientation"
+
+        return None
+
+    def _check_vase_pattern(self, code: str, prompt: str) -> Optional[str]:
+        """
+        Vérifie le pattern spécifique pour un vase
+        """
+        prompt_lower = prompt.lower()
+        if "vase" not in prompt_lower:
+            return None
+
+        # Vase = loft OR revolve, NOT BOTH
+        has_loft = ".loft(" in code
+        has_revolve = ".revolve(" in code
+
+        if has_loft and has_revolve:
+            return "SEMANTIC ERROR: Vase should use EITHER loft() OR revolve(), NOT BOTH"
+
+        # If loft, must have shell
+        if has_loft and ".shell(" not in code:
+            return "SEMANTIC ERROR: Vase needs .shell() to be hollow after lofting"
+
+        # Check for multiple workplane offsets (loft pattern)
+        if has_loft:
+            import re
+            workplane_count = len(re.findall(r'\.workplane\s*\(\s*offset\s*=', code))
+            circle_count = len(re.findall(r'\.circle\s*\(', code))
+
+            if circle_count < 2:
+                return "SEMANTIC ERROR: Vase loft needs at least 2 circles at different heights"
+
+        return None
+
+    def _check_pipe_pattern(self, code: str, prompt: str) -> Optional[str]:
+        """
+        Vérifie le pattern spécifique pour un tuyau (pipe)
+        """
+        prompt_lower = prompt.lower()
+        if "pipe" not in prompt_lower and "tube" not in prompt_lower:
+            return None
+
+        # Pipe = outer cylinder + inner cut + chamfer/fillet rims
+        # Check hollow
+        if ".cut(" not in code and "shell(" not in code and "extrude(-" not in code:
+            return "SEMANTIC ERROR: Pipe must be hollow (needs inner cylinder cut)"
+
+        # Check for top face selection before inner cut
+        if "extrude(-" in code and "faces(" not in code:
+            return "SEMANTIC ERROR: Pipe inner cut needs faces('>Z').workplane() before circle"
+
+        return None
+
+    def _check_hallucinated_methods(self, code: str) -> Optional[str]:
+        """
+        Vérifie les méthodes hallucinées courantes
+        """
+        hallucinations = {
+            ".torus(": "Use revolve pattern: profile = cq.Workplane('XZ').moveTo(major_r, 0).circle(minor_r); result = profile.revolve(360, (0,0,0), (0,1,0), clean=False)",
+            ".cylinder(": "Use circle().extrude(): cq.Workplane('XY').circle(r).extrude(h)",
+            ".cone(": "Use loft pattern: cq.Workplane('XY').circle(r1).workplane(offset=h).circle(r2).loft()",
+            ".regularPolygon(": "Use .polygon(nSides, diameter)",
+            ".helix(": "Use Wire.makeHelix(pitch, height, radius)",
+            "Workplane.helix": "Use Wire.makeHelix(pitch, height, radius)",
+        }
+
+        for hallucination, fix in hallucinations.items():
+            if hallucination in code:
+                return f"SEMANTIC ERROR: {hallucination} doesn't exist. {fix}"
 
         return None
 
