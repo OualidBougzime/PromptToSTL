@@ -109,10 +109,10 @@ class BatchRunner:
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"Batch runner initialized. Logs will be saved to: {log_file}")
 
-    async def run_single_prompt(self, prompt: str, index: int) -> Dict[str, Any]:
+    async def run_single_prompt(self, prompt: str, index: int, total: int) -> Dict[str, Any]:
         """Execute a single prompt and return results."""
         self.logger.info(f"\n{'='*80}")
-        self.logger.info(f"[{index + 1}/{len(PROMPTS)}] Processing prompt:")
+        self.logger.info(f"[{index + 1}/{total}] Processing prompt:")
         self.logger.info(f"  {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
         self.logger.info(f"{'='*80}\n")
 
@@ -178,10 +178,11 @@ class BatchRunner:
         self.logger.info(f"Results will be saved to: {self.output_dir}\n")
 
         overall_start = datetime.now()
+        total_prompts = len(prompts)
 
         # Execute each prompt
         for i, prompt in enumerate(prompts):
-            result = await self.run_single_prompt(prompt, i)
+            result = await self.run_single_prompt(prompt, i, total_prompts)
             self.results.append(result)
 
         overall_end = datetime.now()
