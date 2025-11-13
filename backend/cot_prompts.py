@@ -12,8 +12,9 @@ ARCHITECT_SYSTEM_PROMPT = """You are the Architect. Read the user's prompt and s
 CRITICAL RULES:
 1. Extract ONLY what is explicitly mentioned - do not invent features
 2. If units are not given, assume mm
-3. NEVER suggest revolve unless an explicit 2D profile is planned
-4. Extract ALL numeric values precisely as given
+3. VASE PATTERN DETECTION: If prompt mentions "radius X at height Y, radius Z at height W" → use LOFT, NOT revolve (even if prompt says "revolving")
+4. NEVER suggest revolve unless an explicit closed 2D profile is described (e.g., "revolve a circle with arc")
+5. Extract ALL numeric values precisely as given
 
 Output only a compact JSON with:
 {
@@ -65,11 +66,11 @@ VALID OPERATIONS (use ONLY these):
 
 CRITICAL RULES:
 1. NEVER use: placeSketch, copy, helix (on Workplane), cylinder, cone, torus, cutThruAll (unless you provide pending wire first)
-2. revolve: Only AFTER creating a closed 2D profile with .close()
+2. revolve: ONLY use if you have an EXPLICIT closed 2D profile (lineTo, arc, close). NEVER use with moveTo after circle!
 3. cut: Only AFTER creating a pending sketch (circle/rect) on a selected face, then extrude negative
 4. For helical spring: {"op": "makeHelix", "args": {"pitch": P, "height": H, "radius": R}}, then {"op": "sweep", "args": {"isFrenet": true}}
 5. For pipe: outer solid first, then select top face, create inner circle, extrude negative
-6. For vase: LOFT circles at different Z heights, then shell from top
+6. For vase with varying radii: ALWAYS use LOFT (circle + workplane(offset=h1) + circle + workplane(offset=h2) + circle + loft), NEVER revolve
 7. For bowl: Either (A) sphere + split + shell OR (B) revolve a closed half-disk (choose A if unsure)
 8. For screw (no threads): shaft cylinder, then hex head with polygon(6, diameter=2*circumradius), then union
 
@@ -122,6 +123,23 @@ BOWL (sphere_r=40, wall=3, rim_fillet=1):
   {"op":"shell","args":{"t":3},"comment":"hollow"},
   {"op":"select","args":{"edges":">Z"},"comment":"rim"},
   {"op":"fillet","args":{"r":1},"comment":"rim fillet"}
+]
+
+VASE (r1=30 at z=0, r2=22 at z=60, r3=35 at z=120, wall=3):
+[
+  {"op":"workplane","args":{"plane":"XY"},"comment":"base"},
+  {"op":"circle","args":{"r":30},"comment":"base circle"},
+  {"op":"workplane","args":{"offset":60},"comment":"mid level"},
+  {"op":"circle","args":{"r":22},"comment":"mid circle"},
+  {"op":"workplane","args":{"offset":60},"comment":"top level (120 total)"},
+  {"op":"circle","args":{"r":35},"comment":"top circle"},
+  {"op":"loft","args":{},"comment":"loft profile"},
+  {"op":"select","args":{"faces":">Z"},"comment":"top face"},
+  {"op":"shell","args":{"t":-3},"comment":"hollow out"},
+  {"op":"select","args":{"faces":"<Z"},"comment":"bottom"},
+  {"op":"workplane","args":{},"comment":"sketch on bottom"},
+  {"op":"circle","args":{"r":27},"comment":"inner radius - wall"},
+  {"op":"extrude","args":{"h":3},"comment":"flat bottom"}
 ]
 
 Return ONLY the JSON with this structure:
@@ -259,6 +277,7 @@ VASE (lofted):
 import cadquery as cq
 from pathlib import Path
 
+# Vase with varying radius at different heights - use LOFT, not revolve!
 outer = (cq.Workplane("XY")
     .circle(30)
     .workplane(offset=60)
