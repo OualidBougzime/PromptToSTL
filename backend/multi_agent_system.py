@@ -807,11 +807,25 @@ class SyntaxValidatorAgent:
         try:
             compile(code, "<generated>", "exec")
         except SyntaxError as e:
-            errors.append(f"Syntax error at line {e.lineno}: {e.msg}")
+            # Sauvegarder le code qui échoue pour debugging
+            from pathlib import Path
+            import datetime
+            output_dir = Path(__file__).parent / "output"
+            output_dir.mkdir(exist_ok=True)
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            failed_file = output_dir / f"failed_syntax_{timestamp}.py"
+            failed_file.write_text(code)
+
+            error_msg = f"Syntax error at line {e.lineno}: {e.msg}"
+            errors.append(error_msg)
+            log.error(f"❌ {error_msg}")
+            log.error(f"💾 Failed code saved to: {failed_file}")
+            log.error(f"📝 Code snippet around error:\n{self._get_code_context(code, e.lineno)}")
+
             return AgentResult(
                 status=AgentStatus.FAILED,
                 errors=errors,
-                metadata={"line": e.lineno, "offset": e.offset}
+                metadata={"line": e.lineno, "offset": e.offset, "saved_to": str(failed_file)}
             )
 
         # Vérifications supplémentaires
@@ -861,6 +875,22 @@ class SyntaxValidatorAgent:
                 "variables_defined": len(defined_vars)
             }
         )
+
+    def _get_code_context(self, code: str, error_line: int, context_lines: int = 3) -> str:
+        """
+        Retourne les lignes de code autour de l'erreur pour affichage
+        """
+        lines = code.split('\n')
+        start = max(0, error_line - context_lines - 1)
+        end = min(len(lines), error_line + context_lines)
+
+        context = []
+        for i in range(start, end):
+            line_num = i + 1
+            marker = " >>> " if line_num == error_line else "     "
+            context.append(f"{marker}{line_num:4d} | {lines[i]}")
+
+        return '\n'.join(context)
 
 
 # ========== AGENT 5: ERROR HANDLER ==========
