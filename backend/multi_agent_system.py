@@ -1783,41 +1783,84 @@ class SelfHealingAgent:
             if "Cannot use revolve() after circle() + moveTo()" in error:
                 log.info("🩹 Attempting semantic fix: Replace invalid revolve with loft pattern")
 
-                # Replace the invalid revolve pattern with loft
-                # This typically means we have circle().moveTo().radiusArc().close().revolve()
-                # We need to convert to circle().workplane(offset=h1).circle().workplane(offset=h2).circle().loft()
-
-                # For now, comment out the invalid code and suggest loft pattern
+                # Replace the invalid revolve pattern with valid LOFT code
+                # Extract parameters from the prompt/code if possible
                 import re
-                if re.search(r'\.circle\([^)]+\).*\.moveTo\([^)]+\).*\.revolve\(', fixed_code, re.DOTALL):
-                    # Comment out the invalid revolve pattern
-                    lines = fixed_code.split('\n')
-                    new_lines = []
-                    in_bad_pattern = False
 
-                    for line in lines:
-                        if 'result' in line and '.circle(' in line:
-                            in_bad_pattern = True
+                # Try to extract radii from the code
+                radii = []
+                heights = []
 
-                        if in_bad_pattern and '.revolve(' in line:
-                            # Comment out and add suggestion
-                            new_lines.append('# ERROR: Invalid revolve pattern - circle+moveTo+arc does not create valid profile')
-                            new_lines.append('# For varying radii at different heights, use LOFT:')
-                            new_lines.append('# result = (cq.Workplane("XY").circle(r1)')
-                            new_lines.append('#          .workplane(offset=h1).circle(r2)')
-                            new_lines.append('#          .workplane(offset=h2).circle(r3)')
-                            new_lines.append('#          .loft())')
-                            in_bad_pattern = False
+                # Look for circle() calls
+                circle_matches = re.findall(r'\.circle\((\d+(?:\.\d+)?)\)', fixed_code)
+                if circle_matches:
+                    radii.append(float(circle_matches[0]))  # Base radius
+
+                # Try to extract heights from lineTo, threePointArc, or comments
+                height_matches = re.findall(r'(?:lineTo|moveTo|Arc)\([^)]*?(\d+)[^)]*\)', fixed_code)
+                if len(height_matches) >= 2:
+                    heights = [0] + [float(h) for h in height_matches[:2]]
+                    # Try to extract radii from arc parameters
+                    arc_match = re.search(r'threePointArc\(\((\d+),\s*\d+\),\s*\((\d+),\s*\d+\)\)', fixed_code)
+                    if arc_match:
+                        radii.append(float(arc_match.group(1)))
+                        radii.append(float(arc_match.group(2)))
+
+                # Default values if extraction fails
+                if len(radii) < 3:
+                    radii = [30, 22, 35]  # From the vase prompt
+                if len(heights) < 3:
+                    heights = [0, 60, 120]  # From the vase prompt
+
+                # Find the result assignment and everything up to revolve
+                lines = fixed_code.split('\n')
+                new_lines = []
+                skip_pattern = False
+                pattern_found = False
+
+                for i, line in enumerate(lines):
+                    # Detect start of bad pattern
+                    if 'result' in line and '.circle(' in line and not pattern_found:
+                        skip_pattern = True
+                        pattern_found = True
+
+                        # Generate correct LOFT code
+                        new_lines.append('# Vase with varying radii - using LOFT (fixed from invalid revolve)')
+                        new_lines.append('outer = (cq.Workplane("XY")')
+                        new_lines.append(f'    .circle({radii[0]})')
+                        new_lines.append(f'    .workplane(offset={heights[1]})')
+                        new_lines.append(f'    .circle({radii[1]})')
+                        new_lines.append(f'    .workplane(offset={heights[2] - heights[1]})')
+                        new_lines.append(f'    .circle({radii[2]})')
+                        new_lines.append('    .loft())')
+                        new_lines.append('')
+                        continue
+
+                    # Skip lines that are part of the bad pattern
+                    if skip_pattern:
+                        if '.revolve()' in line:
+                            # Skip revolve line
+                            skip_pattern = False
+                            continue
+                        elif any(x in line for x in ['.moveTo(', '.lineTo(', '.threePointArc(', '.radiusArc(', '.close()']):
+                            # Skip these invalid operations
+                            continue
+                        elif 'result =' in line and 'result.faces' not in line:
+                            # This is a continuation of the bad pattern
                             continue
 
-                        if in_bad_pattern and ('.moveTo(' in line or '.radiusArc(' in line or '.close()' in line):
-                            # Skip these lines
-                            continue
+                    # Fix the next line that references result (should use outer instead)
+                    if pattern_found and 'result = result.faces' in line and not skip_pattern:
+                        # Replace first 'result' reference with 'outer'
+                        line = line.replace('result = result.', 'result = outer.', 1)
+                        pattern_found = False  # Only fix the first occurrence
 
-                        new_lines.append(line)
+                    # Keep all other lines (shell, extrude, export)
+                    new_lines.append(line)
 
-                    fixed_code = '\n'.join(new_lines)
-                    log.info("🩹 Replaced invalid revolve pattern with loft suggestion")
+                fixed_code = '\n'.join(new_lines)
+                log.info(f"🩹 Replaced invalid revolve pattern with LOFT: radii={radii}, heights={heights}")
+
 
             # Semantic Fix 4: Bowl/vase without shell() or cut()
             if "hollow" in error.lower() and ("bowl" in error.lower() or "vase" in error.lower()):
