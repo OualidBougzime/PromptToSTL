@@ -1225,6 +1225,58 @@ class SelfHealingAgent:
                 )
                 log.info("🩹 Fixed: Removed invalid 'sweepAngle' parameter from sweep()")
 
+            # 3d3: radiusArc() with invalid keyword arguments (endX, endY)
+            if "radiusArc() got an unexpected keyword argument" in error:
+                # radiusArc API: radiusArc((x, y), radius) NOT radiusArc(endX=x, endY=y, radius=r)
+                # Pattern: .radiusArc(endX=30, endY=60, radius=22) → .radiusArc((30, 60), 22)
+                def fix_radiusArc(match):
+                    # Extract the full call
+                    full_match = match.group(0)
+                    # Try to find endX, endY, radius values
+                    endX_match = re.search(r'endX\s*=\s*([^,\)]+)', full_match)
+                    endY_match = re.search(r'endY\s*=\s*([^,\)]+)', full_match)
+                    radius_match = re.search(r'radius\s*=\s*([^,\)]+)', full_match)
+
+                    if endX_match and endY_match and radius_match:
+                        x = endX_match.group(1).strip()
+                        y = endY_match.group(1).strip()
+                        r = radius_match.group(1).strip()
+                        return f'.radiusArc(({x}, {y}), {r})'
+                    return full_match
+
+                fixed_code = re.sub(
+                    r'\.radiusArc\s*\([^)]+\)',
+                    fix_radiusArc,
+                    fixed_code
+                )
+                log.info("🩹 Fixed: Converted radiusArc(endX=, endY=, radius=) to radiusArc((x, y), radius)")
+
+            # 3d4: threePointArc() with invalid keyword arguments
+            if "threePointArc() got an unexpected keyword argument" in error:
+                # threePointArc API: threePointArc((x1, y1), (x2, y2)) NOT threePointArc(x1=, y1=, x2=, y2=)
+                def fix_threePointArc(match):
+                    full_match = match.group(0)
+                    # Try to find point coordinates
+                    x1_match = re.search(r'(?:x1|point1X)\s*=\s*([^,\)]+)', full_match)
+                    y1_match = re.search(r'(?:y1|point1Y)\s*=\s*([^,\)]+)', full_match)
+                    x2_match = re.search(r'(?:x2|point2X)\s*=\s*([^,\)]+)', full_match)
+                    y2_match = re.search(r'(?:y2|point2Y)\s*=\s*([^,\)]+)', full_match)
+
+                    if x1_match and y1_match and x2_match and y2_match:
+                        x1 = x1_match.group(1).strip()
+                        y1 = y1_match.group(1).strip()
+                        x2 = x2_match.group(1).strip()
+                        y2 = y2_match.group(1).strip()
+                        return f'.threePointArc(({x1}, {y1}), ({x2}, {y2}))'
+                    return full_match
+
+                fixed_code = re.sub(
+                    r'\.threePointArc\s*\([^)]+\)',
+                    fix_threePointArc,
+                    fixed_code
+                )
+                log.info("🩹 Fixed: Converted threePointArc keyword args to positional tuples")
+
             # 3e: cut() without argument
             if "cut() missing 1 required positional argument" in error:
                 # Replace .cut() with .cutThruAll()
