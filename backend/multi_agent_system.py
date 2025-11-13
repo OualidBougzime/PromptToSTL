@@ -1332,17 +1332,21 @@ class SelfHealingAgent:
                             # TODO: Implement automatic .extrude() insertion
                             pass
 
-            # 3g: BRep_API command not done - CRITICAL for torus revolve
+            # 3g: BRep_API command not done - CRITICAL for torus revolve and bad revolve profiles
             # This happens when using wrong workplane OR missing clean=False for 360° revolves
+            # OR trying to revolve an invalid/non-closed profile
             if "BRep_API: command not done" in error or "brep_api: command not done" in error.lower():
                 log.info("🩹 Attempting to fix: BRep_API error (likely missing clean=False or wrong workplane)")
 
                 # Strategy: First copy all lines, then make modifications
                 lines = fixed_code.split('\n')
+                revolve_found = False
 
                 # Find revolve operations and fix them
                 for i, line in enumerate(lines):
                     if '.revolve(' in line:
+                        revolve_found = True
+
                         # Fix 1: Add clean=False for 360° revolves
                         if '360' in line and 'clean=False' not in line:
                             # Find the closing parenthesis of revolve() and add clean=False before it
@@ -1374,6 +1378,23 @@ class SelfHealingAgent:
                                 if 'Workplane("XY")' in line:
                                     lines[i] = lines[i].replace('Workplane("XY")', 'Workplane("XZ")')
                                     log.info("🩹 Fixed: Changed Workplane('XY') to Workplane('XZ') for Y-axis revolve (inline)")
+
+                        # Fix 3: Detect invalid revolve profile (circle() + lineTo() + close() → this creates TWO wires!)
+                        # Look back for pattern: .circle() ... .lineTo() ... .close() ... .revolve()
+                        # This is WRONG - revolve needs a SINGLE closed 2D profile
+                        if revolve_found:
+                            # Check last 10 lines for suspicious pattern
+                            profile_section = lines[max(0, i-10):i+1]
+                            has_circle = any('.circle(' in l for l in profile_section)
+                            has_lineTo = any('.lineTo(' in l for l in profile_section)
+                            has_close = any('.close()' in l for l in profile_section)
+
+                            if has_circle and (has_lineTo or has_close):
+                                log.warning("🩹 Detected invalid revolve profile: circle() + lineTo()/close() creates multiple wires!")
+                                log.warning("   → Suggestion: Use sphere() method instead for bowl shapes")
+                                # Can't auto-fix this easily - would need to replace entire shape logic
+                                # But we can comment it out and leave a hint
+                                pass
 
                 fixed_code = '\n'.join(lines)
 
@@ -2137,6 +2158,14 @@ class CriticAgent:
         if pipe_issue:
             issues.append(pipe_issue)
 
+        bowl_issue = self._check_bowl_pattern(code, prompt)
+        if bowl_issue:
+            issues.append(bowl_issue)
+
+        screw_issue = self._check_screw_pattern(code, prompt)
+        if screw_issue:
+            issues.append(screw_issue)
+
         # Analyse 1 : Tables avec pieds mal positionnés
         if any(keyword in prompt.lower() for keyword in ["table", "desk", "stand"]):
             leg_issue = self._check_table_legs(code, prompt)
@@ -2508,6 +2537,48 @@ class CriticAgent:
         # Check for top face selection before inner cut
         if "extrude(-" in code and "faces(" not in code:
             return "SEMANTIC ERROR: Pipe inner cut needs faces('>Z').workplane() before circle"
+
+        return None
+
+    def _check_bowl_pattern(self, code: str, prompt: str) -> Optional[str]:
+        """
+        Vérifie le pattern spécifique pour un bol (bowl)
+        """
+        prompt_lower = prompt.lower()
+        if "bowl" not in prompt_lower and "hemisphere" not in prompt_lower:
+            return None
+
+        # Bowl = sphere + split/shell, NOT revolve
+        # Revolve a semicircle is very error-prone (BRep_API errors)
+        if ".revolve(" in code and ".sphere(" not in code:
+            return "SEMANTIC ERROR: Prompt asks for SPHERE but code uses revolve. Use: cq.Workplane('XY').sphere(radius)"
+
+        # Bowl must be hollow
+        if ".shell(" not in code and ".cut(" not in code:
+            return "SEMANTIC ERROR: Bowl must be hollow (use .shell() or .cut())"
+
+        return None
+
+    def _check_screw_pattern(self, code: str, prompt: str) -> Optional[str]:
+        """
+        Vérifie le pattern spécifique pour une vis (screw)
+        """
+        prompt_lower = prompt.lower()
+        if "screw" not in prompt_lower and "bolt" not in prompt_lower:
+            return None
+
+        # Screw = shaft + hex head + union
+        # Check for shaft (cylinder)
+        if ".circle(" not in code or ".extrude(" not in code:
+            return "SEMANTIC ERROR: Screw needs cylindrical shaft: circle(r).extrude(h)"
+
+        # Check for hex head (polygon)
+        if "hex" in prompt_lower and ".polygon(" not in code:
+            return "SEMANTIC ERROR: Hex head needs polygon(6, diameter)"
+
+        # Check for union
+        if ".union(" not in code:
+            return "SEMANTIC ERROR: Screw needs .union() to join shaft and head"
 
         return None
 

@@ -126,20 +126,21 @@ BOWL (sphere_r=40, wall=3, rim_fillet=1):
 ]
 
 VASE (r1=30 at z=0, r2=22 at z=60, r3=35 at z=120, wall=3):
+CRITICAL: Use LOFT, NOT revolve! Revolve will fail with "no pending wires".
 [
-  {"op":"workplane","args":{"plane":"XY"},"comment":"base"},
+  {"op":"workplane","args":{"plane":"XY"},"comment":"base at Z=0"},
   {"op":"circle","args":{"r":30},"comment":"base circle"},
-  {"op":"workplane","args":{"offset":60},"comment":"mid level"},
+  {"op":"workplane","args":{"offset":60},"comment":"mid level at Z=60"},
   {"op":"circle","args":{"r":22},"comment":"mid circle"},
-  {"op":"workplane","args":{"offset":60},"comment":"top level (120 total)"},
+  {"op":"workplane","args":{"offset":60},"comment":"top level at Z=120 (offset from last)"},
   {"op":"circle","args":{"r":35},"comment":"top circle"},
-  {"op":"loft","args":{},"comment":"loft profile"},
-  {"op":"select","args":{"faces":">Z"},"comment":"top face"},
-  {"op":"shell","args":{"t":-3},"comment":"hollow out"},
-  {"op":"select","args":{"faces":"<Z"},"comment":"bottom"},
-  {"op":"workplane","args":{},"comment":"sketch on bottom"},
-  {"op":"circle","args":{"r":27},"comment":"inner radius - wall"},
-  {"op":"extrude","args":{"h":3},"comment":"flat bottom"}
+  {"op":"loft","args":{},"comment":"loft all circles"},
+  {"op":"select","args":{"faces":">Z"},"comment":"select top opening"},
+  {"op":"shell","args":{"t":-3},"comment":"hollow out with 3mm wall"},
+  {"op":"select","args":{"faces":"<Z"},"comment":"select bottom"},
+  {"op":"workplane","args":{},"comment":"sketch on bottom face"},
+  {"op":"circle","args":{"r":27},"comment":"bottom disc (r-wall)"},
+  {"op":"extrude","args":{"h":3},"comment":"solid flat bottom 3mm"}
 ]
 
 Return ONLY the JSON with this structure:
@@ -236,15 +237,26 @@ cq.exporters.export(result, str(output_path))
 print(f"✅ STL exported to: {output_path}")
 ```
 
-BOWL (hemispherical):
+BOWL (hemispherical - use sphere method, NOT revolve):
 ```python
 import cadquery as cq
 from pathlib import Path
 
+# CRITICAL: Use sphere(), NOT revolve! Revolve a semicircle is complex and error-prone.
+# Create full sphere
 result = cq.Workplane("XY").sphere(40)
-result = result.faces(">Z").workplane().split(keepTop=True, keepBottom=False)
+
+# Split to keep only bottom half (bowl)
+# Note: CadQuery split() works differently - use faces().workplane()
+result = result.faces(">Z").workplane().split(keepTop=False, keepBottom=True)
+
+# Hollow out with 3mm wall thickness
 result = result.shell(-3)
-result = result.faces("<Z").workplane().circle(37).extrude(3)
+
+# Optional: Add solid flat bottom disc
+# result = result.faces("<Z").workplane().circle(37).extrude(3)
+
+# Fillet the rim
 result = result.edges(">Z").fillet(1)
 
 # Export
@@ -255,14 +267,27 @@ cq.exporters.export(result, str(output_path))
 print(f"✅ STL exported to: {output_path}")
 ```
 
-SCREW (no threads):
+SCREW (no threads - shaft + hex head):
 ```python
 import cadquery as cq
 from pathlib import Path
 
+# Shaft (cylindrical)
 shaft = cq.Workplane("XY").circle(4).extrude(50)
-head = cq.Workplane("XY").polygon(6, 12).extrude(5).translate((0,0,50))
-result = shaft.union(head).edges(">Z").chamfer(0.5)
+
+# Hex head (polygon with 6 sides, diameter = 2 * circumradius)
+# polygon(n, diameter) where diameter is the OUTER diameter (point to point)
+head = cq.Workplane("XY").polygon(6, 12).extrude(5).translate((0, 0, 50))
+
+# Union both parts
+result = shaft.union(head)
+
+# Optional chamfer on top edges (may fail if edges not selected properly)
+# Use faces(">Z").edges() to be more specific
+try:
+    result = result.faces(">Z").edges().chamfer(0.5)
+except:
+    pass  # Skip chamfer if it fails
 
 # Export
 output_dir = Path(__file__).parent / "output"
@@ -272,22 +297,26 @@ cq.exporters.export(result, str(output_path))
 print(f"✅ STL exported to: {output_path}")
 ```
 
-VASE (lofted):
+VASE (lofted - varying radius at different heights):
 ```python
 import cadquery as cq
 from pathlib import Path
 
-# Vase with varying radius at different heights - use LOFT, not revolve!
+# CRITICAL: Vase with varying radii → use LOFT, NOT revolve!
+# workplane(offset=X) is CUMULATIVE from previous level
 outer = (cq.Workplane("XY")
-    .circle(30)
-    .workplane(offset=60)
+    .circle(30)              # Base at Z=0, r=30
+    .workplane(offset=60)    # Mid at Z=60, r=22
     .circle(22)
-    .workplane(offset=120)
+    .workplane(offset=60)    # Top at Z=120, r=35 (offset from Z=60)
     .circle(35)
-    .loft())
+    .loft())                 # Loft all 3 circles
 
+# Hollow out from top opening
 result = outer.faces(">Z").shell(-3)
-result = result.faces("<Z").workplane().circle(32).extrude(3)
+
+# Add solid bottom disc (radius = smallest_circle_r - wall)
+result = result.faces("<Z").workplane().circle(27).extrude(3)
 
 # Export
 output_dir = Path(__file__).parent / "output"
