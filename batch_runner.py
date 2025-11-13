@@ -64,14 +64,14 @@ def load_prompts(prompts_file: str = "prompts.json") -> List[str]:
                     for p in config.get('prompts', [])
                     if p.get('enabled', True)
                 ]
-                print(f"✅ Loaded {len(prompts)} prompts from {prompts_file}")
+                print(f"[OK] Loaded {len(prompts)} prompts from {prompts_file}")
                 return prompts
         except Exception as e:
-            print(f"⚠️  Error loading {prompts_file}: {e}")
+            print(f"[WARNING] Error loading {prompts_file}: {e}")
             print(f"   Falling back to default prompts")
             return DEFAULT_PROMPTS
     else:
-        print(f"ℹ️  {prompts_file} not found, using default prompts")
+        print(f"[INFO] {prompts_file} not found, using default prompts")
         return DEFAULT_PROMPTS
 
 
@@ -129,9 +129,12 @@ class BatchRunner:
             "execution_time_seconds": 0
         }
 
-        # Progress callback to capture logs
-        def progress_callback(message: str, progress: int):
-            log_entry = f"[Progress {progress}%] {message}"
+        # Progress callback to capture logs (async function matching main.py signature)
+        async def progress_callback(event_type: str, data: dict):
+            """Handle progress events from the orchestrator."""
+            message = data.get("message", "")
+            progress = data.get("progress", 0)
+            log_entry = f"[Progress {progress}%] {event_type}: {message}"
             result["logs"].append(log_entry)
             self.logger.info(f"  {log_entry}")
 
@@ -149,26 +152,26 @@ class BatchRunner:
 
             if not result["success"]:
                 result["error"] = workflow_result.get("error", "Unknown error")
-                self.logger.error(f"  ❌ Failed: {result['error']}")
+                self.logger.error(f"  [FAILED] {result['error']}")
             else:
-                self.logger.info(f"  ✅ Success! STL saved to: {result['stl_path']}")
+                self.logger.info(f"  [SUCCESS] STL saved to: {result['stl_path']}")
 
                 # Save the generated code to a separate file
                 if result["code"]:
                     code_file = self.output_dir / f"prompt_{index + 1:02d}_code.py"
                     code_file.write_text(result["code"])
-                    self.logger.info(f"  📝 Code saved to: {code_file}")
+                    self.logger.info(f"  [CODE] Saved to: {code_file}")
 
         except Exception as e:
             result["error"] = str(e)
-            self.logger.error(f"  ❌ Exception: {e}", exc_info=True)
+            self.logger.error(f"  [EXCEPTION] {e}", exc_info=True)
 
         # Calculate execution time
         end_time = datetime.now()
         result["end_time"] = end_time.isoformat()
         result["execution_time_seconds"] = (end_time - start_time).total_seconds()
 
-        self.logger.info(f"  ⏱️  Execution time: {result['execution_time_seconds']:.2f}s\n")
+        self.logger.info(f"  [TIME] Execution time: {result['execution_time_seconds']:.2f}s\n")
 
         return result
 
@@ -203,8 +206,8 @@ class BatchRunner:
         self.logger.info("BATCH RUN SUMMARY")
         self.logger.info(f"{'='*80}")
         self.logger.info(f"Total prompts: {len(self.results)}")
-        self.logger.info(f"Successful:    {successful} ✅")
-        self.logger.info(f"Failed:        {failed} ❌")
+        self.logger.info(f"Successful:    {successful}")
+        self.logger.info(f"Failed:        {failed}")
         self.logger.info(f"Total time:    {total_time:.2f}s")
         self.logger.info(f"Average time:  {total_time / len(self.results):.2f}s per prompt")
         self.logger.info(f"{'='*80}\n")
@@ -230,7 +233,7 @@ class BatchRunner:
                 "results": self.results
             }, f, indent=2, ensure_ascii=False)
 
-        self.logger.info(f"📊 Results saved to: {results_file}")
+        self.logger.info(f"[RESULTS] Results saved to: {results_file}")
 
 
 async def main():
@@ -240,7 +243,7 @@ async def main():
     prompts = load_prompts(prompts_file)
 
     if not prompts:
-        print("❌ No prompts to execute!")
+        print("[ERROR] No prompts to execute!")
         return
 
     # Run batch
@@ -249,7 +252,7 @@ async def main():
 
     # Print final message
     print("\n" + "="*80)
-    print("✨ Batch run complete! Check the 'batch_results' folder for:")
+    print("[COMPLETE] Batch run complete! Check the 'batch_results' folder for:")
     print("  - batch_run_*.log     : Full execution logs")
     print("  - batch_results_*.json: Structured results with all data")
     print("  - prompt_*_code.py    : Generated Python code for each prompt")
