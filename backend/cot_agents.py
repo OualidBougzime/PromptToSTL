@@ -502,17 +502,29 @@ Original prompt: {prompt}
             elif "```" in response:
                 json_str = response.split("```")[1].split("```")[0].strip()
 
-            # Nettoyer les commentaires JavaScript (// et /* */)
-            json_str = re.sub(r'//.*$', '', json_str, flags=re.MULTILINE)  # Commentaires //
-            json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)  # Commentaires /* */
+            # ============================================================
+            # CRITICAL JSON FIXES - Ollama génère souvent du JSON invalide
+            # ============================================================
 
-            # Nettoyer les virgules finales avant } ou ]
+            # 1. Nettoyer les commentaires JavaScript (// et /* */)
+            json_str = re.sub(r'//.*$', '', json_str, flags=re.MULTILINE)
+            json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)
+
+            # 2. Nettoyer les virgules finales avant } ou ]
             json_str = re.sub(r',\s*([}\]])', r'\1', json_str)
 
-            # Nettoyer les patterns JSON invalides
+            # 3. FIX CRITIQUE : "y:60" → "y": 60 (manque espace après :)
+            # Pattern: "key:value" where value is a number
+            json_str = re.sub(r'"(\w+):(\s*[-+]?\d+(?:\.\d+)?)"', r'"\1": \2', json_str)
+
+            # 4. FIX : "key:value" (pas de guillemets autour de la valeur)
+            # Pattern: "key: value" → "key": value (ajout du guillemet manquant avant :)
+            json_str = re.sub(r'"(\w+):\s*([^",}\]]+?)\s*([,}\]])', r'"\1": \2\3', json_str)
+
+            # 5. Nettoyer les patterns JSON invalides
             json_str = re.sub(r':\s*value\b', ': 50', json_str, flags=re.IGNORECASE)
 
-            # Évaluer les expressions mathématiques
+            # 6. Évaluer les expressions mathématiques
             def eval_math(match):
                 try:
                     expr = match.group(1)
@@ -524,6 +536,10 @@ Original prompt: {prompt}
                 return match.group(0)
 
             json_str = re.sub(r':\s*([0-9\s\+\-\*\/\(\)\.]+)(?=\s*[,}\]])', eval_math, json_str)
+
+            # 7. FIX : {"x":0,"y:60} → {"x":0,"y":60} (detect missing quote before colon in object values)
+            # This handles cases like {"p1":{"x":0,"y:60},"p2":...}
+            json_str = re.sub(r',\s*"(\w+):([^"]*?)([,}])', r',"\1":\2\3', json_str)
 
             try:
                 data = json.loads(json_str)
