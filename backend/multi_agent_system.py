@@ -1749,6 +1749,46 @@ class SelfHealingAgent:
 
                 fixed_code = '\n'.join(new_lines)
 
+            # Semantic Fix 3b: Invalid revolve pattern (circle + moveTo + arc + revolve)
+            if "Cannot use revolve() after circle() + moveTo()" in error:
+                log.info("🩹 Attempting semantic fix: Replace invalid revolve with loft pattern")
+
+                # Replace the invalid revolve pattern with loft
+                # This typically means we have circle().moveTo().radiusArc().close().revolve()
+                # We need to convert to circle().workplane(offset=h1).circle().workplane(offset=h2).circle().loft()
+
+                # For now, comment out the invalid code and suggest loft pattern
+                import re
+                if re.search(r'\.circle\([^)]+\).*\.moveTo\([^)]+\).*\.revolve\(', fixed_code, re.DOTALL):
+                    # Comment out the invalid revolve pattern
+                    lines = fixed_code.split('\n')
+                    new_lines = []
+                    in_bad_pattern = False
+
+                    for line in lines:
+                        if 'result' in line and '.circle(' in line:
+                            in_bad_pattern = True
+
+                        if in_bad_pattern and '.revolve(' in line:
+                            # Comment out and add suggestion
+                            new_lines.append('# ERROR: Invalid revolve pattern - circle+moveTo+arc does not create valid profile')
+                            new_lines.append('# For varying radii at different heights, use LOFT:')
+                            new_lines.append('# result = (cq.Workplane("XY").circle(r1)')
+                            new_lines.append('#          .workplane(offset=h1).circle(r2)')
+                            new_lines.append('#          .workplane(offset=h2).circle(r3)')
+                            new_lines.append('#          .loft())')
+                            in_bad_pattern = False
+                            continue
+
+                        if in_bad_pattern and ('.moveTo(' in line or '.radiusArc(' in line or '.close()' in line):
+                            # Skip these lines
+                            continue
+
+                        new_lines.append(line)
+
+                    fixed_code = '\n'.join(new_lines)
+                    log.info("🩹 Replaced invalid revolve pattern with loft suggestion")
+
             # Semantic Fix 4: Bowl/vase without shell() or cut()
             if "hollow" in error.lower() and ("bowl" in error.lower() or "vase" in error.lower()):
                 log.info("🩹 Attempting semantic fix: Add shell() for hollow bowl/vase")
@@ -2353,6 +2393,20 @@ class CriticAgent:
         # If loft, must have shell
         if has_loft and ".shell(" not in code:
             return "SEMANTIC ERROR: Vase needs .shell() to be hollow after lofting"
+
+        # Check for invalid revolve pattern (circle + moveTo + arc + close + revolve)
+        if has_revolve:
+            import re
+            # Detect pattern: circle() followed by moveTo() before revolve()
+            if re.search(r'\.circle\([^)]+\).*\.moveTo\([^)]+\).*\.revolve\(', code, re.DOTALL):
+                return "SEMANTIC ERROR: Cannot use revolve() after circle() + moveTo() - this creates invalid profile. For varying radii at different heights, use LOFT instead: circle().workplane(offset=h).circle().loft()"
+
+            # Vase with revolve must have explicit 2D profile (lineTo, arc, close)
+            has_close = ".close(" in code
+            has_lineto_or_arc = ".lineTo(" in code or ".radiusArc(" in code or ".threePointArc(" in code
+
+            if not (has_close and has_lineto_or_arc):
+                return "SEMANTIC ERROR: Vase with revolve() needs explicit closed 2D profile (lineTo/arc + close). For varying radii, use LOFT instead"
 
         # Check for multiple workplane offsets (loft pattern)
         if has_loft:

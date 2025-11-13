@@ -88,12 +88,13 @@ Module optionnel de vérification post-génération :
 - Critic : Vérifie coordonnées des pieds
 
 ### 2. VASE ✅
-**Problème** : JSON parsing failed, No pending wires, loft+revolve conflict
+**Problème** : JSON parsing failed, No pending wires, loft+revolve conflict, BRep_API error with invalid revolve pattern
 **Solution** :
-- Planner : JSON schema strict, nettoie commentaires et trailing commas
-- Synthesizer : Pattern loft robuste (circles à Z différents + loft + shell)
-- Critic : Détecte loft+revolve conflict, vérifie shell présent
-- Healer : Supprime revolve si loft existe
+- Architect : Détecte pattern "radius X at height Y" → recommande LOFT, PAS revolve (même si prompt dit "revolving")
+- Planner : JSON schema strict, nettoie commentaires et trailing commas, pattern VASE explicite avec étapes loft
+- Synthesizer : Pattern loft robuste (circles à Z différents + loft + shell), arc operations avec tuples uniquement
+- Critic : Détecte loft+revolve conflict, détecte revolve invalide (circle+moveTo+arc+revolve), vérifie shell présent
+- Healer : Supprime revolve si loft existe, remplace revolve invalide par suggestion loft, fixe radiusArc/threePointArc keyword args
 
 ### 3. GLASS (Drinking) ✅
 **Problème** : Ordre paramètres cylinder inversé, fillet échoue, pas creux
