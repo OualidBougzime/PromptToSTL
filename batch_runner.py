@@ -20,6 +20,7 @@ import logging
 sys.path.insert(0, str(Path(__file__).parent / "backend"))
 
 from multi_agent_system import OrchestratorAgent
+from agents import AnalystAgent, GeneratorAgent, ValidatorAgent
 
 
 # Default list of CAD prompts (used if prompts.json doesn't exist)
@@ -80,7 +81,14 @@ class BatchRunner:
     def __init__(self, output_dir: Path = None):
         self.output_dir = output_dir or Path(__file__).parent / "batch_results"
         self.output_dir.mkdir(exist_ok=True)
-        self.orchestrator = OrchestratorAgent()
+
+        # Initialize the three base agents
+        analyst = AnalystAgent()
+        generator = GeneratorAgent()
+        validator = ValidatorAgent()
+
+        # Create orchestrator with the required agents
+        self.orchestrator = OrchestratorAgent(analyst, generator, validator)
         self.results = []
 
         # Configure logging
