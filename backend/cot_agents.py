@@ -541,6 +541,21 @@ Original prompt: {prompt}
             # This handles cases like {"p1":{"x":0,"y:60},"p2":...}
             json_str = re.sub(r',\s*"(\w+):([^"]*?)([,}])', r',"\1":\2\3', json_str)
 
+            # 8. FIX CRITIQUE : Convert tuples to objects (0, 60) → {"x": 0, "y": 60}
+            # This fixes the Bowl JSON parse error where LLM generates (x, y) instead of {"x":x, "y":y}
+            def tuple_to_object(match):
+                """Convert (x, y) tuples to {"x": x, "y": y} objects in JSON"""
+                try:
+                    x = match.group(1).strip()
+                    y = match.group(2).strip()
+                    # Return object format
+                    return f'{{"x": {x}, "y": {y}}}'
+                except:
+                    return match.group(0)  # Return original if conversion fails
+
+            # Pattern: (number, number) where numbers can be int or float
+            json_str = re.sub(r'\((\s*[-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\s*\)', tuple_to_object, json_str)
+
             try:
                 data = json.loads(json_str)
             except json.JSONDecodeError as je:

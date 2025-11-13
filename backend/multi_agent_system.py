@@ -1907,6 +1907,103 @@ class SelfHealingAgent:
 
                     fixed_code = '\n'.join(lines)
 
+            # Semantic Fix 5: Bowl with .box() fallback → sphere + shell
+            if "SEMANTIC ERROR: Prompt asks for SPHERE but code uses .box(" in error:
+                log.info("🩹 Attempting semantic fix: Replace .box() with sphere() + shell() for bowl")
+
+                # Extract radius from prompt or error (default 40mm)
+                import re
+                radius = 40
+                radius_match = re.search(r'radius[:\s]*(\d+)', error.lower())
+                if radius_match:
+                    radius = int(radius_match.group(1))
+
+                # Replace .box() with sphere + split + shell + bottom
+                lines = fixed_code.split('\n')
+                new_lines = []
+                replaced = False
+
+                for line in lines:
+                    if '.box(' in line and not replaced:
+                        indent_match = re.match(r'(\s*)', line)
+                        indent = indent_match.group(1) if indent_match else ''
+
+                        # Generate hemisphere bowl code
+                        new_lines.append(f'{indent}# Hemispherical bowl (fixed from .box() fallback)')
+                        new_lines.append(f'{indent}result = cq.Workplane("XY").sphere({radius})')
+                        new_lines.append(f'{indent}# Cut top half to make bowl')
+                        new_lines.append(f'{indent}result = result.faces(">Z").workplane().split(keepTop=True, keepBottom=False)')
+                        new_lines.append(f'{indent}# Shell 3mm wall thickness')
+                        new_lines.append(f'{indent}result = result.shell(-3)')
+                        new_lines.append(f'{indent}# Add flat bottom 3mm thick')
+                        new_lines.append(f'{indent}result = result.faces("<Z").workplane().circle({radius - 3}).extrude(3)')
+                        new_lines.append(f'{indent}# Fillet rim edges')
+                        new_lines.append(f'{indent}result = result.edges(">Z").fillet(1)')
+                        log.info(f"🩹 Replaced .box() with hemisphere bowl (radius={radius})")
+                        replaced = True
+                    else:
+                        new_lines.append(line)
+
+                fixed_code = '\n'.join(new_lines)
+
+            # Semantic Fix 6: Spring needs Wire.makeHelix + sweep
+            if "SEMANTIC ERROR" in error and ("spring" in error.lower() or "helix" in error.lower()):
+                log.info("🩹 Attempting semantic fix: Generate Wire.makeHelix + sweep for spring")
+
+                # Extract parameters (defaults from typical spring)
+                pitch = 8
+                height = 80
+                major_radius = 20
+                wire_radius = 1.5
+
+                import re
+                pitch_match = re.search(r'pitch[:\s]*(\d+)', error.lower())
+                height_match = re.search(r'height[:\s]*(\d+)', error.lower())
+                major_match = re.search(r'(?:major|coil)[_\s]*radius[:\s]*(\d+)', error.lower())
+                wire_match = re.search(r'(?:wire|minor)[_\s]*radius[:\s]*(\d+(?:\.\d+)?)', error.lower())
+
+                if pitch_match:
+                    pitch = int(pitch_match.group(1))
+                if height_match:
+                    height = int(height_match.group(1))
+                if major_match:
+                    major_radius = int(major_match.group(1))
+                if wire_match:
+                    wire_radius = float(wire_match.group(1))
+
+                # Replace entire shape generation with correct spring code
+                lines = fixed_code.split('\n')
+                new_lines = []
+                skip_shape = False
+                replaced = False
+
+                for line in lines:
+                    # Detect start of shape creation (skip wrong code)
+                    if not replaced and any(x in line for x in ['result =', 'cq.Workplane']):
+                        if any(x in line for x in ['.circle(', '.box(', '.sphere(', '.cylinder(']):
+                            skip_shape = True
+                            indent_match = re.match(r'(\s*)', line)
+                            indent = indent_match.group(1) if indent_match else ''
+
+                            # Insert correct spring code
+                            new_lines.append(f'{indent}# Helical spring using Wire.makeHelix + sweep')
+                            new_lines.append(f'{indent}path = cq.Wire.makeHelix(pitch={pitch}, height={height}, radius={major_radius}, lefthand=False)')
+                            new_lines.append(f'{indent}result = cq.Workplane("XY").circle({wire_radius}).sweep(path, isFrenet=True)')
+                            log.info(f"🩹 Generated spring: pitch={pitch}, height={height}, R={major_radius}, r={wire_radius}")
+                            replaced = True
+                            continue
+
+                    # Skip shape creation lines after replacement
+                    if skip_shape:
+                        if any(x in line for x in ['.extrude(', '.revolve(', '.loft(', '.sweep(']):
+                            continue
+                        else:
+                            skip_shape = False
+
+                    new_lines.append(line)
+
+                fixed_code = '\n'.join(new_lines)
+
         # Call proactive cleanup at the end
         fixed_code = self._remove_hallucinated_imports(fixed_code)
 
