@@ -1972,60 +1972,65 @@ class SelfHealingAgent:
                 fixed_code = '\n'.join(new_lines)
 
             # Semantic Fix 6: Spring needs Wire.makeHelix + sweep
-            if "SEMANTIC ERROR" in error and ("spring" in error.lower() or "helix" in error.lower()):
+            if "SEMANTIC ERROR" in error and ("spring" in error.lower() or "helix" in error.lower() or "sweep" in error.lower() or "extrude" in error.lower()):
                 log.info("🩹 Attempting semantic fix: Generate Wire.makeHelix + sweep for spring")
 
-                # Extract parameters (defaults from typical spring)
+                # Extract parameters from PROMPT (more reliable than error)
                 pitch = 8
                 height = 80
                 major_radius = 20
                 wire_radius = 1.5
 
                 import re
-                pitch_match = re.search(r'pitch[:\s]*(\d+)', error.lower())
-                height_match = re.search(r'height[:\s]*(\d+)', error.lower())
-                major_match = re.search(r'(?:major|coil)[_\s]*radius[:\s]*(\d+)', error.lower())
-                wire_match = re.search(r'(?:wire|minor)[_\s]*radius[:\s]*(\d+(?:\.\d+)?)', error.lower())
+                # Extract from prompt: "pitch 8 mm", "height 80 mm", "major radius 20 mm", "circle radius 1.5 mm"
+                pitch_match = re.search(r'pitch[:\s]+(\d+(?:\.\d+)?)\s*mm', prompt, re.IGNORECASE)
+                height_match = re.search(r'(?:total\s+)?height[:\s]+(\d+(?:\.\d+)?)\s*mm', prompt, re.IGNORECASE)
+                major_match = re.search(r'(?:major|coil)[_\s]+radius[:\s]+(\d+(?:\.\d+)?)\s*mm', prompt, re.IGNORECASE)
+                # Wire radius can be "circle radius X" or "radius X" (first occurrence)
+                wire_match = re.search(r'(?:circle|wire|minor)[_\s]+radius[:\s]+(\d+(?:\.\d+)?)\s*mm', prompt, re.IGNORECASE)
 
                 if pitch_match:
-                    pitch = int(pitch_match.group(1))
+                    pitch = float(pitch_match.group(1))
                 if height_match:
-                    height = int(height_match.group(1))
+                    height = float(height_match.group(1))
                 if major_match:
-                    major_radius = int(major_match.group(1))
+                    major_radius = float(major_match.group(1))
                 if wire_match:
                     wire_radius = float(wire_match.group(1))
 
                 # Replace entire shape generation with correct spring code
+                # Strategy: Find first 'result =' then skip until export section
                 lines = fixed_code.split('\n')
                 new_lines = []
-                skip_shape = False
+                skip_until_export = False
                 replaced = False
 
                 for line in lines:
-                    # Detect start of shape creation (skip wrong code)
-                    if not replaced and any(x in line for x in ['result =', 'cq.Workplane']):
-                        if any(x in line for x in ['.circle(', '.box(', '.sphere(', '.cylinder(']):
-                            skip_shape = True
-                            indent_match = re.match(r'(\s*)', line)
-                            indent = indent_match.group(1) if indent_match else ''
+                    # Detect start of shape creation (first 'result =')
+                    if 'result =' in line and not replaced and 'result.faces' not in line and 'result.edges' not in line:
+                        skip_until_export = True
+                        indent_match = re.match(r'(\s*)', line)
+                        indent = indent_match.group(1) if indent_match else ''
 
-                            # Insert correct spring code
-                            new_lines.append(f'{indent}# Helical spring using Wire.makeHelix + sweep')
-                            new_lines.append(f'{indent}path = cq.Wire.makeHelix(pitch={pitch}, height={height}, radius={major_radius}, lefthand=False)')
-                            new_lines.append(f'{indent}result = cq.Workplane("XY").circle({wire_radius}).sweep(path, isFrenet=True)')
-                            log.info(f"🩹 Generated spring: pitch={pitch}, height={height}, R={major_radius}, r={wire_radius}")
-                            replaced = True
-                            continue
+                        # Insert correct spring code
+                        new_lines.append(f'{indent}# Helical spring using Wire.makeHelix + sweep')
+                        new_lines.append(f'{indent}path = cq.Wire.makeHelix(pitch={pitch}, height={height}, radius={major_radius}, lefthand=False)')
+                        new_lines.append(f'{indent}result = cq.Workplane("XY").circle({wire_radius}).sweep(path, isFrenet=True)')
+                        new_lines.append(f'{indent}')
+                        log.info(f"🩹 Generated spring: pitch={pitch}, height={height}, R={major_radius}, r={wire_radius}")
+                        replaced = True
+                        continue  # Skip the 'result =' line
 
-                    # Skip shape creation lines after replacement
-                    if skip_shape:
-                        if any(x in line for x in ['.extrude(', '.revolve(', '.loft(', '.sweep(']):
-                            continue
+                    # Skip all lines until we hit export/output section
+                    if skip_until_export:
+                        if 'export' in line.lower() or 'Path' in line or 'output' in line or line.strip().startswith('#'):
+                            skip_until_export = False
+                            new_lines.append(line)
                         else:
-                            skip_shape = False
-
-                    new_lines.append(line)
+                            # Skip shape creation lines
+                            continue
+                    else:
+                        new_lines.append(line)
 
                 fixed_code = '\n'.join(new_lines)
 
@@ -2585,17 +2590,25 @@ class CriticAgent:
             return None
 
         # Spring = Wire.makeHelix + sweep
+        # MUST have Wire.makeHelix (not just check for invalid .helix())
+        if "Wire.makeHelix" not in code and "makeHelix" not in code:
+            return "SEMANTIC ERROR: Spring needs Wire.makeHelix(pitch, height, radius) to create helix path"
+
         # MUST NOT use: Workplane.helix() (doesn't exist)
         if ".helix(" in code and "Wire.makeHelix" not in code:
             return "SEMANTIC ERROR: Workplane.helix() doesn't exist. Use Wire.makeHelix(pitch, height, radius)"
 
         # MUST have sweep
-        if "sweep" not in code:
+        if "sweep" not in code and ".sweep(" not in code:
             return "SEMANTIC ERROR: Spring needs sweep() to follow helix path"
 
         # Check isFrenet parameter
         if "sweep(" in code and "isFrenet" not in code:
             return "SEMANTIC ERROR: Spring sweep should use isFrenet=True for proper orientation"
+
+        # Check that code doesn't just extrude (cylinder fallback)
+        if ".extrude(" in code and "sweep" not in code:
+            return "SEMANTIC ERROR: Spring should use sweep(path), not extrude() - extrude creates cylinder not helix"
 
         return None
 
