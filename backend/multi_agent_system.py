@@ -1848,49 +1848,48 @@ class SelfHealingAgent:
                     heights = [0, 60, 120]  # Safe defaults
 
                 # Find the result assignment and everything up to revolve
+                # Strategy: Detect 'result =' then skip all lines until '.revolve(' and replace with LOFT
                 lines = fixed_code.split('\n')
                 new_lines = []
-                skip_pattern = False
-                pattern_found = False
+                skip_until_revolve = False
+                replaced = False
 
                 for i, line in enumerate(lines):
-                    # Detect start of bad pattern
-                    if 'result' in line and '.circle(' in line and not pattern_found:
-                        skip_pattern = True
-                        pattern_found = True
+                    # Detect start of shape creation (first 'result =' that's not a reassignment)
+                    if 'result =' in line and not replaced and 'result.faces' not in line and 'result.edges' not in line:
+                        skip_until_revolve = True
+                        indent_match = re.match(r'(\s*)', line)
+                        indent = indent_match.group(1) if indent_match else ''
 
                         # Generate correct LOFT code
-                        new_lines.append('# Vase with varying radii - using LOFT (fixed from invalid revolve)')
-                        new_lines.append('outer = (cq.Workplane("XY")')
-                        new_lines.append(f'    .circle({radii[0]})')
-                        new_lines.append(f'    .workplane(offset={heights[1]})')
-                        new_lines.append(f'    .circle({radii[1]})')
-                        new_lines.append(f'    .workplane(offset={heights[2] - heights[1]})')
-                        new_lines.append(f'    .circle({radii[2]})')
-                        new_lines.append('    .loft())')
-                        new_lines.append('')
-                        continue
+                        new_lines.append(f'{indent}# Vase with varying radii - using LOFT (fixed from invalid revolve)')
+                        new_lines.append(f'{indent}outer = (cq.Workplane("XY")')
+                        new_lines.append(f'{indent}    .circle({radii[0]})')
+                        new_lines.append(f'{indent}    .workplane(offset={heights[1]})')
+                        new_lines.append(f'{indent}    .circle({radii[1]})')
+                        new_lines.append(f'{indent}    .workplane(offset={heights[2] - heights[1]})')
+                        new_lines.append(f'{indent}    .circle({radii[2]})')
+                        new_lines.append(f'{indent}    .loft())')
+                        new_lines.append(f'{indent}')
+                        new_lines.append(f'{indent}# Shell 3mm wall')
+                        new_lines.append(f'{indent}result = outer.faces(">Z").shell(-3)')
+                        new_lines.append(f'{indent}# Add solid bottom 3mm')
+                        new_lines.append(f'{indent}result = result.faces("<Z").workplane().circle({radii[0] - 3}).extrude(3)')
+                        new_lines.append(f'{indent}')
+                        replaced = True
+                        continue  # Skip the 'result =' line
 
-                    # Skip lines that are part of the bad pattern
-                    if skip_pattern:
-                        if '.revolve()' in line:
-                            # Skip revolve line
-                            skip_pattern = False
-                            continue
-                        elif any(x in line for x in ['.moveTo(', '.lineTo(', '.threePointArc(', '.radiusArc(', '.close()']):
-                            # Skip these invalid operations
-                            continue
-                        elif 'result =' in line and 'result.faces' not in line:
-                            # This is a continuation of the bad pattern
+                    # Skip all lines until we find revolve
+                    if skip_until_revolve:
+                        if '.revolve(' in line or 'revolve(' in line:
+                            # Found revolve, stop skipping
+                            skip_until_revolve = False
+                            continue  # Skip the revolve line itself
+                        else:
+                            # Skip intermediate shape creation lines (circle, moveTo, arc, close, etc.)
                             continue
 
-                    # Fix the next line that references result (should use outer instead)
-                    if pattern_found and 'result = result.faces' in line and not skip_pattern:
-                        # Replace first 'result' reference with 'outer'
-                        line = line.replace('result = result.', 'result = outer.', 1)
-                        pattern_found = False  # Only fix the first occurrence
-
-                    # Keep all other lines (shell, extrude, export)
+                    # Keep all other lines (export, comments, etc.)
                     new_lines.append(line)
 
                 fixed_code = '\n'.join(new_lines)
