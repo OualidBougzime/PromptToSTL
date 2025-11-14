@@ -409,6 +409,15 @@ class OrchestratorAgent:
             code = self.self_healing._remove_hallucinated_imports(code)
             context.generated_code = code
 
+            # DEBUG: Log generated code for spring cases to help debug cylinder issue
+            if "spring" in prompt.lower() or "helix" in prompt.lower():
+                log.info("=" * 80)
+                log.info("🔍 DEBUG: Generated code for SPRING:")
+                log.info("-" * 80)
+                for i, line in enumerate(code.split('\n'), 1):
+                    log.info(f"{i:3d}: {line}")
+                log.info("=" * 80)
+
             # PHASE 6: Validation et exécution (Agent existant)
             if progress_callback:
                 await progress_callback("status", {"message": "⚙️ Executing and validating...", "progress": 80})
@@ -1941,14 +1950,16 @@ class SelfHealingAgent:
                         break
 
                 # Replace revolve pattern with sphere + split + shell
+                # Strategy: Detect first 'result =' (like vase/spring) then skip all until export
                 lines = fixed_code.split('\n')
                 new_lines = []
                 skip_until_export = False
                 replaced = False
 
                 for line in lines:
-                    # Detect revolve pattern and replace entire shape creation
-                    if not replaced and '.revolve(' in line:
+                    # Detect START of shape creation (first 'result =')
+                    if 'result =' in line and not replaced and 'result.faces' not in line and 'result.edges' not in line:
+                        skip_until_export = True
                         indent_match = re.match(r'(\s*)', line)
                         indent = indent_match.group(1) if indent_match else ''
 
@@ -1963,23 +1974,31 @@ class SelfHealingAgent:
                         new_lines.append(f'{indent}bowl = bowl.faces(">Z").shell(-3)')
                         new_lines.append(f'{indent}# Add flat bottom disc 3mm thick')
                         new_lines.append(f'{indent}bowl = bowl.faces("<Z").workplane().circle({radius - 3}).extrude(3)')
-                        new_lines.append(f'{indent}# Fillet rim edges')
-                        new_lines.append(f'{indent}result = bowl.edges(">Z").fillet(1)')
+                        new_lines.append(f'{indent}# Fillet rim edges (skip if fails)')
+                        new_lines.append(f'{indent}try:')
+                        new_lines.append(f'{indent}    result = bowl.edges(">Z").fillet(1)')
+                        new_lines.append(f'{indent}except:')
+                        new_lines.append(f'{indent}    result = bowl  # Skip fillet if geometry too complex')
+                        new_lines.append(f'{indent}')
                         log.info(f"🩹 Replaced revolve with hemisphere bowl (radius={radius})")
                         replaced = True
-                        skip_until_export = True
-                    elif skip_until_export:
-                        # Skip old shape creation lines until we hit export section
-                        if 'export' in line.lower() or 'Path' in line or 'output' in line or line.strip().startswith('#'):
+                        continue  # Skip the 'result =' line
+
+                    # Skip ALL lines until we hit export/output section
+                    if skip_until_export:
+                        if 'export' in line.lower() or 'Path' in line or 'output' in line:
                             skip_until_export = False
                             new_lines.append(line)
+                        else:
+                            # Skip all shape creation lines
+                            continue
                     else:
                         new_lines.append(line)
 
                 fixed_code = '\n'.join(new_lines)
 
             # Semantic Fix 6: Spring needs Wire.makeHelix + sweep
-            if "SEMANTIC ERROR" in error and ("spring" in error.lower() or "helix" in error.lower() or "sweep" in error.lower() or "extrude" in error.lower()) and 'spring_helix_fix' not in fixes_applied:
+            if "SEMANTIC ERROR" in error and ("spring" in error.lower() or "helix" in error.lower() or "sweep" in error.lower() or "extrude" in error.lower() or "turns" in error.lower() or "pitch" in error.lower()) and 'spring_helix_fix' not in fixes_applied:
                 fixes_applied.add('spring_helix_fix')  # Mark as applied to avoid duplicate
                 log.info("🩹 Attempting semantic fix: Generate Wire.makeHelix + sweep for spring")
 
@@ -2005,6 +2024,20 @@ class SelfHealingAgent:
                     major_radius = float(major_match.group(1))
                 if wire_match:
                     wire_radius = float(wire_match.group(1))
+
+                # Validate parameters to ensure visible spring
+                if pitch <= 0:
+                    pitch = 8
+                    log.warning(f"⚠️ Invalid pitch (<= 0), using default: {pitch}")
+                if height <= pitch * 2:
+                    height = max(pitch * 10, 80)  # At least 10 turns
+                    log.warning(f"⚠️ Height too small for spring, adjusted to: {height} (for ~{height/pitch:.1f} turns)")
+                if major_radius <= 0:
+                    major_radius = 20
+                    log.warning(f"⚠️ Invalid major radius, using default: {major_radius}")
+                if wire_radius <= 0:
+                    wire_radius = 1.5
+                    log.warning(f"⚠️ Invalid wire radius, using default: {wire_radius}")
 
                 # Replace entire shape generation with correct spring code
                 # Strategy: Find first 'result =' then skip until export section
@@ -2617,6 +2650,27 @@ class CriticAgent:
         # Check that code doesn't just extrude (cylinder fallback)
         if ".extrude(" in code and "sweep" not in code:
             return "SEMANTIC ERROR: Spring should use sweep(path), not extrude() - extrude creates cylinder not helix"
+
+        # Validate Wire.makeHelix parameters to ensure visible spring
+        import re
+        helix_match = re.search(r'makeHelix\s*\(\s*pitch\s*=\s*(\d+(?:\.\d+)?)\s*,\s*height\s*=\s*(\d+(?:\.\d+)?)\s*,\s*radius\s*=\s*(\d+(?:\.\d+)?)', code)
+        if helix_match:
+            pitch = float(helix_match.group(1))
+            height = float(helix_match.group(2))
+            radius = float(helix_match.group(3))
+
+            # Validate parameters
+            if pitch <= 0:
+                return "SEMANTIC ERROR: Spring pitch must be > 0 (pitch=0 creates circle, not helix)"
+            if height <= pitch:
+                return "SEMANTIC ERROR: Spring height must be > pitch (need at least 2 turns for visible spring)"
+            if radius <= 0:
+                return "SEMANTIC ERROR: Spring radius must be > 0"
+
+            # Check for reasonable number of turns (at least 3 for a spring)
+            turns = height / pitch
+            if turns < 3:
+                return f"SEMANTIC ERROR: Spring needs at least 3 turns for proper spring shape (current: {turns:.1f} turns = {height}mm / {pitch}mm)"
 
         return None
 
