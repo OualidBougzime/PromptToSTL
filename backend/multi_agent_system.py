@@ -1884,8 +1884,8 @@ class SelfHealingAgent:
                         new_lines.append(f'{indent}    .circle({radii[2]})')
                         new_lines.append(f'{indent}    .loft())')
                         new_lines.append(f'{indent}')
-                        new_lines.append(f'{indent}# Shell 3mm wall')
-                        new_lines.append(f'{indent}result = outer.faces(">Z").shell(-3)')
+                        new_lines.append(f'{indent}# Shell 3mm wall - hollows the entire vase')
+                        new_lines.append(f'{indent}result = outer.shell(-3)')
                         new_lines.append(f'{indent}# Add solid bottom 3mm')
                         new_lines.append(f'{indent}result = result.faces("<Z").workplane().circle({radii[0] - 3}).extrude(3)')
                         new_lines.append(f'{indent}')
@@ -1924,10 +1924,10 @@ class SelfHealingAgent:
                                 lines[i] += ')'
                             # Check if line ends with a method call
                             if lines[i].rstrip().endswith(')'):
-                                # Add shell to the chain
+                                # Add shell to the chain - shell() without face selection hollows the entire object
                                 indent_match = re.match(r'(\s*)', lines[i])
                                 next_indent = indent_match.group(1) + '    ' if indent_match else '    '
-                                lines.insert(i + 1, f'{next_indent}.faces(">Z").shell(-3))  # 3mm wall thickness')
+                                lines.insert(i + 1, f'{next_indent}.shell(-3))  # 3mm wall thickness - hollows entire object')
                                 log.info("🩹 Added .shell() for hollow bowl/vase")
                                 break
 
@@ -1970,8 +1970,8 @@ class SelfHealingAgent:
                         new_lines.append(f'{indent}# Cut away top half using a box')
                         new_lines.append(f'{indent}cutter = cq.Workplane("XY").workplane(offset=0.1).box({radius*3}, {radius*3}, {radius*2}, centered=True)')
                         new_lines.append(f'{indent}bowl = bowl.cut(cutter)')
-                        new_lines.append(f'{indent}# Shell 3mm wall thickness from top opening')
-                        new_lines.append(f'{indent}bowl = bowl.faces(">Z").shell(-3)')
+                        new_lines.append(f'{indent}# Shell 3mm wall thickness - hollows the entire bowl')
+                        new_lines.append(f'{indent}bowl = bowl.shell(-3)')
                         new_lines.append(f'{indent}# Add flat bottom disc 3mm thick')
                         new_lines.append(f'{indent}bowl = bowl.faces("<Z").workplane().circle({radius - 3}).extrude(3)')
                         new_lines.append(f'{indent}# Fillet rim edges (skip if fails)')
