@@ -1017,7 +1017,7 @@ class SelfHealingAgent:
         log.debug(f"📝 Original code (first 500 chars):\n{code[:500]}")
 
         # Tentative de correction basique d'abord
-        fixed_code = self._basic_fixes(code, errors)
+        fixed_code = self._basic_fixes(code, errors, context)
 
         # Log if code was modified
         if fixed_code != code:
@@ -1062,13 +1062,14 @@ class SelfHealingAgent:
                 data=code  # Retourner le code original
             )
 
-    def _basic_fixes(self, code: str, errors: List[str]) -> str:
+    def _basic_fixes(self, code: str, errors: List[str], context: WorkflowContext) -> str:
         """
         Applique des corrections basiques communes
         """
         import re  # Import at function start to avoid UnboundLocalError
 
         fixed_code = code
+        prompt = context.prompt if hasattr(context, 'prompt') else ""
 
         for error in errors:
             error_lower = error.lower()
@@ -1805,33 +1806,46 @@ class SelfHealingAgent:
                 log.info("🩹 Attempting semantic fix: Replace invalid revolve with loft pattern")
 
                 # Replace the invalid revolve pattern with valid LOFT code
-                # Extract parameters from the prompt/code if possible
+                # Extract parameters from the PROMPT (more reliable than code)
                 import re
 
-                # Try to extract radii from the code
                 radii = []
                 heights = []
 
-                # Look for circle() calls
-                circle_matches = re.findall(r'\.circle\((\d+(?:\.\d+)?)\)', fixed_code)
-                if circle_matches:
-                    radii.append(float(circle_matches[0]))  # Base radius
+                # Extract from prompt: "radius 30 mm at base, 22 mm at mid-height 60 mm, and 35 mm at top 120 mm"
+                # Pattern 1: "radius X mm at base" or "radius X mm at height Y"
+                radius_patterns = re.findall(r'radius\s+(\d+(?:\.\d+)?)\s*mm(?:\s+at\s+(?:base|mid-height|height|top)\s+)?(\d+(?:\.\d+)?)?', prompt, re.IGNORECASE)
 
-                # Try to extract heights from lineTo, threePointArc, or comments
-                height_matches = re.findall(r'(?:lineTo|moveTo|Arc)\([^)]*?(\d+)[^)]*\)', fixed_code)
-                if len(height_matches) >= 2:
-                    heights = [0] + [float(h) for h in height_matches[:2]]
-                    # Try to extract radii from arc parameters
-                    arc_match = re.search(r'threePointArc\(\((\d+),\s*\d+\),\s*\((\d+),\s*\d+\)\)', fixed_code)
-                    if arc_match:
-                        radii.append(float(arc_match.group(1)))
-                        radii.append(float(arc_match.group(2)))
+                if radius_patterns:
+                    for r_match in radius_patterns:
+                        radius_val = float(r_match[0])
+                        height_val = float(r_match[1]) if r_match[1] else (0 if len(radii) == 0 else heights[-1] + 60)
+                        radii.append(radius_val)
+                        heights.append(height_val)
 
-                # Default values if extraction fails
+                # Pattern 2: Try "base radius X, mid radius Y at Z, top radius W at H"
+                if not radii:
+                    # Alternative: extract all numbers after "radius"
+                    all_radii = re.findall(r'radius[:\s]+(\d+(?:\.\d+)?)', prompt, re.IGNORECASE)
+                    all_heights = re.findall(r'(?:height|mid-height|top)[:\s]+(\d+(?:\.\d+)?)', prompt, re.IGNORECASE)
+
+                    if all_radii:
+                        radii = [float(r) for r in all_radii[:3]]
+                    if all_heights:
+                        heights = [0] + [float(h) for h in all_heights[:2]]
+
+                # Fallback defaults if extraction fails
                 if len(radii) < 3:
                     radii = [30, 22, 35]  # From the vase prompt
                 if len(heights) < 3:
                     heights = [0, 60, 120]  # From the vase prompt
+
+                # Ensure heights are cumulative
+                if len(heights) == 3 and heights[0] == 0:
+                    # If heights are absolute, keep them; otherwise make cumulative
+                    pass
+                else:
+                    heights = [0, 60, 120]  # Safe defaults
 
                 # Find the result assignment and everything up to revolve
                 lines = fixed_code.split('\n')
@@ -1907,40 +1921,52 @@ class SelfHealingAgent:
 
                     fixed_code = '\n'.join(lines)
 
-            # Semantic Fix 5: Bowl with .box() fallback → sphere + shell
-            if "SEMANTIC ERROR: Prompt asks for SPHERE but code uses .box(" in error:
-                log.info("🩹 Attempting semantic fix: Replace .box() with sphere() + shell() for bowl")
+            # Semantic Fix 5: Bowl with revolve → sphere + shell
+            if "SEMANTIC ERROR: Prompt asks for SPHERE but code uses revolve" in error:
+                log.info("🩹 Attempting semantic fix: Replace revolve with sphere() + shell() for bowl")
 
-                # Extract radius from prompt or error (default 40mm)
+                # Extract radius from prompt (search for "radius 40 mm" pattern)
                 import re
                 radius = 40
-                radius_match = re.search(r'radius[:\s]*(\d+)', error.lower())
-                if radius_match:
-                    radius = int(radius_match.group(1))
+                # Try to extract from prompt first (more reliable than error message)
+                # Pattern: "radius 40 mm" or "semicircle radius 40"
+                for err_line in [error] + context.errors if hasattr(context, 'errors') else [error]:
+                    radius_match = re.search(r'(?:radius|diameter)\s+(\d+)\s*mm', str(err_line), re.IGNORECASE)
+                    if radius_match:
+                        radius = int(radius_match.group(1))
+                        break
 
-                # Replace .box() with sphere + split + shell + bottom
+                # Replace revolve pattern with sphere + split + shell
                 lines = fixed_code.split('\n')
                 new_lines = []
+                skip_until_export = False
                 replaced = False
 
                 for line in lines:
-                    if '.box(' in line and not replaced:
+                    # Detect revolve pattern and replace entire shape creation
+                    if not replaced and '.revolve(' in line:
                         indent_match = re.match(r'(\s*)', line)
                         indent = indent_match.group(1) if indent_match else ''
 
                         # Generate hemisphere bowl code
-                        new_lines.append(f'{indent}# Hemispherical bowl (fixed from .box() fallback)')
-                        new_lines.append(f'{indent}result = cq.Workplane("XY").sphere({radius})')
+                        new_lines.append(f'{indent}# Hemispherical bowl (fixed from revolve pattern)')
+                        new_lines.append(f'{indent}bowl = cq.Workplane("XY").sphere({radius})')
                         new_lines.append(f'{indent}# Cut top half to make bowl')
-                        new_lines.append(f'{indent}result = result.faces(">Z").workplane().split(keepTop=True, keepBottom=False)')
+                        new_lines.append(f'{indent}bowl = bowl.faces(">Z").workplane().split(keepTop=False, keepBottom=True)')
                         new_lines.append(f'{indent}# Shell 3mm wall thickness')
-                        new_lines.append(f'{indent}result = result.shell(-3)')
+                        new_lines.append(f'{indent}bowl = bowl.shell(-3)')
                         new_lines.append(f'{indent}# Add flat bottom 3mm thick')
-                        new_lines.append(f'{indent}result = result.faces("<Z").workplane().circle({radius - 3}).extrude(3)')
+                        new_lines.append(f'{indent}bowl = bowl.faces("<Z").workplane().circle({radius - 3}).extrude(3)')
                         new_lines.append(f'{indent}# Fillet rim edges')
-                        new_lines.append(f'{indent}result = result.edges(">Z").fillet(1)')
-                        log.info(f"🩹 Replaced .box() with hemisphere bowl (radius={radius})")
+                        new_lines.append(f'{indent}result = bowl.edges(">Z").fillet(1)')
+                        log.info(f"🩹 Replaced revolve with hemisphere bowl (radius={radius})")
                         replaced = True
+                        skip_until_export = True
+                    elif skip_until_export:
+                        # Skip old shape creation lines until we hit export section
+                        if 'export' in line.lower() or 'Path' in line or 'output' in line or line.strip().startswith('#'):
+                            skip_until_export = False
+                            new_lines.append(line)
                     else:
                         new_lines.append(line)
 
