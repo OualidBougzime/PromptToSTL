@@ -1941,14 +1941,16 @@ class SelfHealingAgent:
                         break
 
                 # Replace revolve pattern with sphere + split + shell
+                # Strategy: Detect first 'result =' (like vase/spring) then skip all until export
                 lines = fixed_code.split('\n')
                 new_lines = []
                 skip_until_export = False
                 replaced = False
 
                 for line in lines:
-                    # Detect revolve pattern and replace entire shape creation
-                    if not replaced and '.revolve(' in line:
+                    # Detect START of shape creation (first 'result =')
+                    if 'result =' in line and not replaced and 'result.faces' not in line and 'result.edges' not in line:
+                        skip_until_export = True
                         indent_match = re.match(r'(\s*)', line)
                         indent = indent_match.group(1) if indent_match else ''
 
@@ -1963,16 +1965,24 @@ class SelfHealingAgent:
                         new_lines.append(f'{indent}bowl = bowl.faces(">Z").shell(-3)')
                         new_lines.append(f'{indent}# Add flat bottom disc 3mm thick')
                         new_lines.append(f'{indent}bowl = bowl.faces("<Z").workplane().circle({radius - 3}).extrude(3)')
-                        new_lines.append(f'{indent}# Fillet rim edges')
-                        new_lines.append(f'{indent}result = bowl.edges(">Z").fillet(1)')
+                        new_lines.append(f'{indent}# Fillet rim edges (skip if fails)')
+                        new_lines.append(f'{indent}try:')
+                        new_lines.append(f'{indent}    result = bowl.edges(">Z").fillet(1)')
+                        new_lines.append(f'{indent}except:')
+                        new_lines.append(f'{indent}    result = bowl  # Skip fillet if geometry too complex')
+                        new_lines.append(f'{indent}')
                         log.info(f"🩹 Replaced revolve with hemisphere bowl (radius={radius})")
                         replaced = True
-                        skip_until_export = True
-                    elif skip_until_export:
-                        # Skip old shape creation lines until we hit export section
-                        if 'export' in line.lower() or 'Path' in line or 'output' in line or line.strip().startswith('#'):
+                        continue  # Skip the 'result =' line
+
+                    # Skip ALL lines until we hit export/output section
+                    if skip_until_export:
+                        if 'export' in line.lower() or 'Path' in line or 'output' in line:
                             skip_until_export = False
                             new_lines.append(line)
+                        else:
+                            # Skip all shape creation lines
+                            continue
                     else:
                         new_lines.append(line)
 
