@@ -1971,14 +1971,7 @@ class SelfHealingAgent:
                         new_lines.append(f'{indent}cutter = cq.Workplane("XY").workplane(offset=0.1).box({radius*3}, {radius*3}, {radius*2}, centered=True)')
                         new_lines.append(f'{indent}bowl = bowl.cut(cutter)')
                         new_lines.append(f'{indent}# Shell 3mm wall thickness - hollows the entire bowl')
-                        new_lines.append(f'{indent}bowl = bowl.shell(-3)')
-                        new_lines.append(f'{indent}# Add flat bottom disc 3mm thick')
-                        new_lines.append(f'{indent}bowl = bowl.faces("<Z").workplane().circle({radius - 3}).extrude(3)')
-                        new_lines.append(f'{indent}# Fillet rim edges (skip if fails)')
-                        new_lines.append(f'{indent}try:')
-                        new_lines.append(f'{indent}    result = bowl.edges(">Z").fillet(1)')
-                        new_lines.append(f'{indent}except:')
-                        new_lines.append(f'{indent}    result = bowl  # Skip fillet if geometry too complex')
+                        new_lines.append(f'{indent}result = bowl.shell(-3)')
                         new_lines.append(f'{indent}')
                         log.info(f"🩹 Replaced revolve with hemisphere bowl (radius={radius})")
                         replaced = True
@@ -2745,10 +2738,11 @@ class CriticAgent:
         if "bowl" not in prompt_lower and "hemisphere" not in prompt_lower:
             return None
 
-        # Bowl = sphere + split/shell, NOT revolve
-        # Revolve a semicircle is very error-prone (BRep_API errors)
+        # If prompt explicitly asks for revolving, allow it
+        # Only suggest sphere() if revolve is NOT mentioned in prompt
         if ".revolve(" in code and ".sphere(" not in code:
-            return "SEMANTIC ERROR: Prompt asks for SPHERE but code uses revolve. Use: cq.Workplane('XY').sphere(radius)"
+            if "revolv" not in prompt_lower:  # Allow "revolve", "revolving", etc.
+                return "SEMANTIC ERROR: Prompt asks for SPHERE but code uses revolve. Use: cq.Workplane('XY').sphere(radius)"
 
         # Bowl must be hollow
         if ".shell(" not in code and ".cut(" not in code:
