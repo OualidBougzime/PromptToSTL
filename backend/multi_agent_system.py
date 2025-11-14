@@ -1071,6 +1071,9 @@ class SelfHealingAgent:
         fixed_code = code
         prompt = context.prompt if hasattr(context, 'prompt') else ""
 
+        # Track which fixes have been applied to avoid duplicate work
+        fixes_applied = set()
+
         for error in errors:
             error_lower = error.lower()
 
@@ -1802,7 +1805,8 @@ class SelfHealingAgent:
                 fixed_code = '\n'.join(new_lines)
 
             # Semantic Fix 3b: Invalid revolve pattern (circle + moveTo + arc + revolve)
-            if "Cannot use revolve() after circle() + moveTo()" in error:
+            if "Cannot use revolve() after circle() + moveTo()" in error and 'vase_loft_fix' not in fixes_applied:
+                fixes_applied.add('vase_loft_fix')  # Mark as applied to avoid duplicate
                 log.info("🩹 Attempting semantic fix: Replace invalid revolve with loft pattern")
 
                 # Replace the invalid revolve pattern with valid LOFT code
@@ -1921,7 +1925,8 @@ class SelfHealingAgent:
                     fixed_code = '\n'.join(lines)
 
             # Semantic Fix 5: Bowl with revolve → sphere + shell
-            if "SEMANTIC ERROR: Prompt asks for SPHERE but code uses revolve" in error:
+            if "SEMANTIC ERROR: Prompt asks for SPHERE but code uses revolve" in error and 'bowl_sphere_fix' not in fixes_applied:
+                fixes_applied.add('bowl_sphere_fix')  # Mark as applied to avoid duplicate
                 log.info("🩹 Attempting semantic fix: Replace revolve with sphere() + shell() for bowl")
 
                 # Extract radius from prompt (search for "radius 40 mm" pattern)
@@ -1972,7 +1977,8 @@ class SelfHealingAgent:
                 fixed_code = '\n'.join(new_lines)
 
             # Semantic Fix 6: Spring needs Wire.makeHelix + sweep
-            if "SEMANTIC ERROR" in error and ("spring" in error.lower() or "helix" in error.lower() or "sweep" in error.lower() or "extrude" in error.lower()):
+            if "SEMANTIC ERROR" in error and ("spring" in error.lower() or "helix" in error.lower() or "sweep" in error.lower() or "extrude" in error.lower()) and 'spring_helix_fix' not in fixes_applied:
+                fixes_applied.add('spring_helix_fix')  # Mark as applied to avoid duplicate
                 log.info("🩹 Attempting semantic fix: Generate Wire.makeHelix + sweep for spring")
 
                 # Extract parameters from PROMPT (more reliable than error)
