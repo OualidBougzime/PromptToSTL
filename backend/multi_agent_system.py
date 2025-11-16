@@ -1970,8 +1970,8 @@ class SelfHealingAgent:
                         new_lines.append(f'{indent}# Cut away top half - box centered at z=radius to cut above z=0')
                         new_lines.append(f'{indent}cutter = cq.Workplane("XY").workplane(offset={radius}).box({radius*3}, {radius*3}, {radius*2}, centered=True)')
                         new_lines.append(f'{indent}bowl = bowl.cut(cutter)')
-                        new_lines.append(f'{indent}# Shell 3mm wall thickness - hollows the entire bowl')
-                        new_lines.append(f'{indent}result = bowl.shell(-3)')
+                        new_lines.append(f'{indent}# Shell 3mm wall thickness - select top face to create opening')
+                        new_lines.append(f'{indent}result = bowl.faces(">Z").shell(-3)')
                         new_lines.append(f'{indent}')
                         log.info(f"🩹 Replaced revolve with hemisphere bowl (radius={radius})")
                         replaced = True
