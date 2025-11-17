@@ -297,6 +297,20 @@ class OrchestratorAgent:
                     log.error(f"Code synthesis failed: {e}")
                     return self._build_error_response(context, f"Code synthesis failed: {e}")
 
+                # Clean emojis from generated code to avoid encoding issues
+                import re
+                emoji_pattern = re.compile("["
+                    u"\U0001F600-\U0001F64F"  # emoticons
+                    u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+                    u"\U0001F680-\U0001F6FF"  # transport & map symbols
+                    u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+                    u"\U00002702-\U000027B0"  # dingbats
+                    u"\U000024C2-\U0001F251"
+                    u"\u2705"  # ✅ check mark
+                    u"\u274C"  # ❌ cross mark
+                    "]+", flags=re.UNICODE)
+                code = emoji_pattern.sub('', code)
+
                 context.generated_code = code
 
             else:
@@ -317,6 +331,21 @@ class OrchestratorAgent:
                     return self._build_error_response(context, "Code generation failed")
 
                 code, detected_type = result.data
+
+                # Clean emojis from generated code to avoid encoding issues
+                import re
+                emoji_pattern = re.compile("["
+                    u"\U0001F600-\U0001F64F"  # emoticons
+                    u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+                    u"\U0001F680-\U0001F6FF"  # transport & map symbols
+                    u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+                    u"\U00002702-\U000027B0"  # dingbats
+                    u"\U000024C2-\U0001F251"
+                    u"\u2705"  # ✅ check mark
+                    u"\u274C"  # ❌ cross mark
+                    "]+", flags=re.UNICODE)
+                code = emoji_pattern.sub('', code)
+
                 context.generated_code = code
 
             # PHASE 5: Syntax Validator - Vérifier la syntaxe
@@ -823,7 +852,7 @@ class SyntaxValidatorAgent:
             output_dir.mkdir(exist_ok=True)
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             failed_file = output_dir / f"failed_syntax_{timestamp}.py"
-            failed_file.write_text(code)
+            failed_file.write_text(code, encoding='utf-8')
 
             error_msg = f"Syntax error at line {e.lineno}: {e.msg}"
             errors.append(error_msg)
@@ -2791,10 +2820,10 @@ class CriticAgent:
                 'error_msg': 'SEMANTIC ERROR: Prompt asks for TORUS but code uses {method}. Use revolve pattern: profile = cq.Workplane("XZ").moveTo(major_r, 0).circle(minor_r); result = profile.revolve(360, (0,0,0), (0,1,0), clean=False)'
             },
             'cone': {
-                'required': ['loft', 'circle', 'workplane'],  # Cone = circle + workplane + circle + loft
+                'required': [],  # Will check manually for cone (loft OR extrude+taper OR .cone())
                 'forbidden': ['.sphere(', '.box(', '.cylinder('],  # .cylinder() is hallucinated method
                 'allow_cylinder': False,  # Cone ne doit PAS être un simple cylinder
-                'error_msg': 'SEMANTIC ERROR: Prompt asks for CONE but code uses {method}. Use loft pattern: base circle + workplane(offset=height) + top circle + loft()'
+                'error_msg': 'SEMANTIC ERROR: Prompt asks for CONE but code uses {method}. Use: 1) .cone() method, 2) .extrude(taper=...), or 3) loft pattern'
             },
             'cylinder': {
                 'required': ['.circle(', '.extrude('],  # Cylinder = circle + extrude
@@ -2841,13 +2870,18 @@ class CriticAgent:
                     if forbidden in code:
                         return requirements['error_msg'].format(method=forbidden)
 
-                # Pour le cone, vérifier qu'il n'utilise PAS juste cylinder
-                if shape == 'cone' and '.extrude(' in code and 'loft' not in code:
-                    # Simple extrude sans loft = cylinder, pas cone
-                    return requirements['error_msg'].format(method='.extrude() without loft')
+                # Pour le cone, vérifier qu'il utilise soit loft, soit taper, soit .cone()
+                if shape == 'cone':
+                    has_loft = 'loft' in code
+                    has_taper = 'taper=' in code or 'taper =' in code
+                    has_cone_method = '.cone(' in code
 
-                # Vérifier que les méthodes requises sont présentes
-                if 'required' in requirements:
+                    if not (has_loft or has_taper or has_cone_method):
+                        # Ni loft, ni taper, ni .cone() = mauvaise forme
+                        return requirements['error_msg'].format(method='.extrude() without loft or taper')
+
+                # Vérifier que les méthodes requises sont présentes (skip if empty list)
+                if 'required' in requirements and len(requirements['required']) > 0:
                     missing = []
                     for required in requirements['required']:
                         if required not in code:
