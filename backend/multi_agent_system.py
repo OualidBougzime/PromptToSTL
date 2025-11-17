@@ -2077,9 +2077,21 @@ class SelfHealingAgent:
 
                         # Insert correct spring code
                         new_lines.append(f'{indent}# Helical spring using Wire.makeHelix + sweep')
-                        new_lines.append(f'{indent}path = cq.Wire.makeHelix(pitch={pitch}, height={height}, radius={major_radius}, lefthand=False)')
+                        new_lines.append(f'{indent}# Add margin for clean trimming')
+                        new_lines.append(f'{indent}margin = {wire_radius * 2}')
+                        new_lines.append(f'{indent}path_height = {height} + 2 * margin')
+                        new_lines.append(f'{indent}path = cq.Wire.makeHelix(pitch={pitch}, height=path_height, radius={major_radius}, lefthand=False)')
+                        new_lines.append(f'{indent}')
                         new_lines.append(f'{indent}# Position circle at helix start point ({major_radius}, 0, 0)')
-                        new_lines.append(f'{indent}result = cq.Workplane("XY").center({major_radius}, 0).circle({wire_radius}).sweep(path, isFrenet=True)')
+                        new_lines.append(f'{indent}spring = cq.Workplane("XY").center({major_radius}, 0).circle({wire_radius}).sweep(path, isFrenet=True)')
+                        new_lines.append(f'{indent}')
+                        new_lines.append(f'{indent}# Trim both ends flat using split()')
+                        new_lines.append(f'{indent}z0 = margin')
+                        new_lines.append(f'{indent}z1 = margin + {height}')
+                        new_lines.append(f'{indent}spring = spring.workplane(offset=z0).split(keepTop=True, keepBottom=False)')
+                        new_lines.append(f'{indent}spring = spring.workplane(offset=z1).split(keepTop=False, keepBottom=True)')
+                        new_lines.append(f'{indent}')
+                        new_lines.append(f'{indent}result = spring')
                         new_lines.append(f'{indent}')
                         log.info(f"🩹 Generated spring: pitch={pitch}, height={height}, R={major_radius}, r={wire_radius}")
                         replaced = True
