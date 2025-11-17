@@ -1189,8 +1189,9 @@ class SelfHealingAgent:
 
                             # Replace with correct pattern
                             new_lines.append(f'{indent}# Torus via revolve (fixed by SelfHealingAgent)')
-                            new_lines.append(f'{indent}profile = cq.Workplane("XZ").moveTo({major_r}, 0).circle({minor_r})')
-                            new_lines.append(f'{indent}{var_name} = profile.revolve(360, (0, 0, 0), (0, 1, 0))')
+                            new_lines.append(f'{indent}{var_name} = (cq.Workplane("XY")')
+                            new_lines.append(f'{indent}    .moveTo({major_r}, 0).circle({minor_r})')
+                            new_lines.append(f'{indent}    .revolve(360, (0, 0, 0), (0, 0, 1)))')
                         else:
                             # No variable assignment, just replace the call
                             indent_match = re.match(r'(\s*)', line)
@@ -1202,8 +1203,9 @@ class SelfHealingAgent:
                                 major_r = param_match.group(1).strip()
                                 minor_r = param_match.group(2).strip()
                                 new_lines.append(f'{indent}# Torus via revolve (fixed by SelfHealingAgent)')
-                                new_lines.append(f'{indent}profile = cq.Workplane("XZ").moveTo({major_r}, 0).circle({minor_r})')
-                                new_lines.append(f'{indent}result = profile.revolve(360, (0, 0, 0), (0, 1, 0))')
+                                new_lines.append(f'{indent}result = (cq.Workplane("XY")')
+                                new_lines.append(f'{indent}    .moveTo({major_r}, 0).circle({minor_r})')
+                                new_lines.append(f'{indent}    .revolve(360, (0, 0, 0), (0, 0, 1)))')
                             else:
                                 new_lines.append(line)  # Keep original if can't parse
                     else:
@@ -3282,7 +3284,7 @@ class CriticAgent:
         Vérifie les méthodes hallucinées courantes
         """
         hallucinations = {
-            ".torus(": "Use revolve pattern: profile = cq.Workplane('XZ').moveTo(major_r, 0).circle(minor_r); result = profile.revolve(360, (0,0,0), (0,1,0), clean=False)",
+            ".torus(": "Use revolve pattern: result = cq.Workplane('XY').moveTo(major_r, 0).circle(minor_r).revolve(360, (0,0,0), (0,0,1))",
             ".cylinder(": "Use circle().extrude(): cq.Workplane('XY').circle(r).extrude(h)",
             ".cone(": "Use loft pattern: cq.Workplane('XY').circle(r1).workplane(offset=h).circle(r2).loft()",
             ".regularPolygon(": "Use .polygon(nSides, diameter)",
