@@ -1990,6 +1990,35 @@ class SelfHealingAgent:
 
                 fixed_code = '\n'.join(new_lines)
 
+            # Semantic Fix 5.5: Spring circle positioning (quick fix before full replacement)
+            if "Circle must be positioned at helix start" in error and 'spring_center_fix' not in fixes_applied:
+                fixes_applied.add('spring_center_fix')  # Mark as applied to avoid duplicate
+                log.info("🩹 Attempting semantic fix: Add .center() for spring circle positioning")
+
+                # Extract radius from makeHelix in code or error message
+                import re
+                radius_match = re.search(r'makeHelix\s*\([^)]*radius\s*=\s*(\d+(?:\.\d+)?)', fixed_code)
+                if radius_match:
+                    radius = radius_match.group(1)
+                else:
+                    # Try to extract from error message
+                    radius_match = re.search(r'center\((\d+(?:\.\d+)?),\s*0\)', error)
+                    radius = radius_match.group(1) if radius_match else '20'
+
+                # Find the line with .circle() before .sweep() and add .center()
+                lines = fixed_code.split('\n')
+                for i, line in enumerate(lines):
+                    if '.circle(' in line and '.sweep(' in line and '.center(' not in line and '.moveTo(' not in line:
+                        # Add .center() before .circle()
+                        # Pattern: Workplane("XY").circle(1.5).sweep(...)
+                        # Replace with: Workplane("XY").center(20, 0).circle(1.5).sweep(...)
+                        fixed_line = line.replace('.circle(', f'.center({radius}, 0).circle(')
+                        lines[i] = fixed_line
+                        log.info(f"🩹 Added .center({radius}, 0) before .circle() for spring")
+                        break
+
+                fixed_code = '\n'.join(lines)
+
             # Semantic Fix 6: Spring needs Wire.makeHelix + sweep
             if "SEMANTIC ERROR" in error and ("spring" in error.lower() or "helix" in error.lower() or "sweep" in error.lower() or "extrude" in error.lower() or "turns" in error.lower() or "pitch" in error.lower()) and 'spring_helix_fix' not in fixes_applied:
                 fixes_applied.add('spring_helix_fix')  # Mark as applied to avoid duplicate
@@ -2049,7 +2078,8 @@ class SelfHealingAgent:
                         # Insert correct spring code
                         new_lines.append(f'{indent}# Helical spring using Wire.makeHelix + sweep')
                         new_lines.append(f'{indent}path = cq.Wire.makeHelix(pitch={pitch}, height={height}, radius={major_radius}, lefthand=False)')
-                        new_lines.append(f'{indent}result = cq.Workplane("XY").circle({wire_radius}).sweep(path, isFrenet=True)')
+                        new_lines.append(f'{indent}# Position circle at helix start point ({major_radius}, 0, 0)')
+                        new_lines.append(f'{indent}result = cq.Workplane("XY").center({major_radius}, 0).circle({wire_radius}).sweep(path, isFrenet=True)')
                         new_lines.append(f'{indent}')
                         log.info(f"🩹 Generated spring: pitch={pitch}, height={height}, R={major_radius}, r={wire_radius}")
                         replaced = True
@@ -2664,6 +2694,18 @@ class CriticAgent:
             turns = height / pitch
             if turns < 3:
                 return f"SEMANTIC ERROR: Spring needs at least 3 turns for proper spring shape (current: {turns:.1f} turns = {height}mm / {pitch}mm)"
+
+        # Check if circle is positioned at helix start point
+        # Helix starts at (radius, 0, 0), so circle should use .center(radius, 0) or .moveTo(radius, 0)
+        if ".circle(" in code and ".sweep(" in code:
+            # Check if there's a .center() or .moveTo() before .circle()
+            if ".center(" not in code and ".moveTo(" not in code:
+                # Extract radius from makeHelix if we found it
+                if helix_match:
+                    radius = helix_match.group(3)
+                    return f"SEMANTIC ERROR: Circle must be positioned at helix start. Use: Workplane(\"XY\").center({radius}, 0).circle(...) or .moveTo({radius}, 0).circle(...)"
+                else:
+                    return "SEMANTIC ERROR: Circle must be positioned at helix start. Use: .center(radius, 0).circle(...) before .sweep()"
 
         return None
 
