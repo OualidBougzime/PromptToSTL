@@ -1542,10 +1542,11 @@ class SelfHealingAgent:
                                 indent = ''
                                 var_name = 'result'
 
-                        # Insert torus code
+                        # Insert torus code (multi-line style matching user's pattern)
                         new_lines.append(f'{indent}# Torus via revolve (fixed by SelfHealingAgent)')
-                        new_lines.append(f'{indent}profile = cq.Workplane("XZ").moveTo({major_r}, 0).circle({minor_r})')
-                        new_lines.append(f'{indent}{var_name} = profile.revolve(360, (0, 0, 0), (0, 1, 0), clean=False)')
+                        new_lines.append(f'{indent}{var_name} = (cq.Workplane("XY")')
+                        new_lines.append(f'{indent}          .moveTo({major_r}, 0).circle({minor_r})')
+                        new_lines.append(f'{indent}          .revolve(360, (0,0,0), (0,0,1)))')
                         log.info(f"🩹 Replaced wrong pattern with torus revolve (major={major_r}, minor={minor_r})")
                         replaced = True
                     else:
@@ -1746,14 +1747,18 @@ class SelfHealingAgent:
                             indent_match = re.match(r'(\s*)', line)
                             indent = indent_match.group(1) if indent_match else ''
 
-                            # Insert correct cone code
-                            new_lines.append(f'{indent}# Cone via loft (fixed by SelfHealingAgent)')
+                            # Insert correct cone code (using extrude with taper)
+                            # Calculate taper angle: taper_deg = -atan2(radius, height) converted to degrees
+                            import math
+                            taper_deg = -math.degrees(math.atan2(base_radius, height))
+
+                            new_lines.append(f'{indent}# Cone via extrude with taper (fixed by SelfHealingAgent)')
+                            new_lines.append(f'{indent}import math')
+                            new_lines.append(f'{indent}taper_deg = -math.degrees(math.atan2({base_radius}, {height}))')
                             new_lines.append(f'{indent}{result_var} = (cq.Workplane("XY")')
-                            new_lines.append(f'{indent}    .circle({base_radius})')
-                            new_lines.append(f'{indent}    .workplane(offset={height})')
-                            new_lines.append(f'{indent}    .circle(0.1)')  # Small top radius for cone point
-                            new_lines.append(f'{indent}    .loft())')
-                            log.info(f"🩹 Replaced wrong pattern with cone loft (base_r={base_radius}, h={height})")
+                            new_lines.append(f'{indent}          .circle({base_radius})')
+                            new_lines.append(f'{indent}          .extrude({height}, taper=taper_deg))')
+                            log.info(f"🩹 Replaced wrong pattern with cone extrude+taper (base_r={base_radius}, h={height})")
                             replaced = True
                             continue
 
@@ -1807,6 +1812,81 @@ class SelfHealingAgent:
                     else:
                         new_lines.append(line)
 
+                fixed_code = '\n'.join(new_lines)
+
+            elif "SEMANTIC ERROR: Prompt asks for RING" in error or "SEMANTIC ERROR: Prompt asks for WASHER" in error or "SEMANTIC ERROR: Prompt asks for ANNULUS" in error:
+                log.info("🩹 Attempting semantic fix: Generate ring/washer (annulus) pattern")
+
+                # Extract parameters from prompt first, then error
+                prompt_lower = context.prompt.lower() if context and context.prompt else ""
+                r_outer = 60  # default outer radius
+                r_inner = 30  # default inner radius
+                thickness = 10  # default thickness
+
+                import re
+                # Try to extract outer diameter/radius
+                outer_match = re.search(r'outer[_\s]*(?:diameter|radius)[:\s]*(\d+)', prompt_lower)
+                if not outer_match:
+                    outer_match = re.search(r'outer[_\s]*(?:diameter|radius)[:\s]*(\d+)', error.lower())
+                if outer_match:
+                    r_outer = int(outer_match.group(1)) / 2  # diameter to radius if needed
+                    # Check if it's already a radius (usually < 100)
+                    if int(outer_match.group(1)) < 100:
+                        r_outer = int(outer_match.group(1))
+
+                # Try to extract inner diameter/radius
+                inner_match = re.search(r'inner[_\s]*(?:diameter|radius)[:\s]*(\d+)', prompt_lower)
+                if not inner_match:
+                    inner_match = re.search(r'inner[_\s]*(?:diameter|radius)[:\s]*(\d+)', error.lower())
+                if inner_match:
+                    r_inner = int(inner_match.group(1)) / 2
+                    if int(inner_match.group(1)) < 100:
+                        r_inner = int(inner_match.group(1))
+
+                # Try to extract thickness
+                thick_match = re.search(r'(?:extrude|thick(?:ness)?)[:\s]*(\d+)', prompt_lower)
+                if not thick_match:
+                    thick_match = re.search(r'(?:extrude|thick(?:ness)?)[:\s]*(\d+)', error.lower())
+                if thick_match:
+                    thickness = int(thick_match.group(1))
+
+                # Replace wrong pattern with ring/washer code
+                lines = fixed_code.split('\n')
+                new_lines = []
+                result_var = 'result'
+                replaced = False
+
+                for line in lines:
+                    if not replaced and ('.box(' in line or ('.circle(' in line and '.extrude(' not in fixed_code)):
+                        # Remove multi-line chained statements (same as other healers)
+                        removed_chain_start = False
+                        while new_lines:
+                            last_line = new_lines[-1].strip()
+                            if ('= (' in last_line and 'cq.Workplane' in last_line) or \
+                               last_line.endswith('(') or \
+                               (last_line.startswith('.') and len(new_lines[-1]) - len(new_lines[-1].lstrip()) > 0):
+                                log.info(f"🩹 Removing chained statement line: {new_lines[-1][:60]}...")
+                                if '=' in new_lines[-1] and not removed_chain_start:
+                                    var_match = re.match(r'\s*(\w+)\s*=', new_lines[-1])
+                                    result_var = var_match.group(1) if var_match else 'result'
+                                    removed_chain_start = True
+                                new_lines.pop()
+                            else:
+                                break
+
+                        indent_match = re.match(r'(\s*)', line)
+                        indent = indent_match.group(1) if indent_match else ''
+
+                        # Insert ring/washer code
+                        new_lines.append(f'{indent}# Ring/Washer (annulus) via two circles + extrude (fixed by SelfHealingAgent)')
+                        new_lines.append(f'{indent}{result_var} = (cq.Workplane("XY")')
+                        new_lines.append(f'{indent}          .circle({r_outer}).circle({r_inner})')
+                        new_lines.append(f'{indent}          .extrude({thickness}))')
+                        log.info(f"🩹 Replaced wrong pattern with ring/washer (R_out={r_outer}, R_in={r_inner}, thick={thickness})")
+                        replaced = True
+                        continue
+
+                    new_lines.append(line)
                 fixed_code = '\n'.join(new_lines)
 
             # Semantic Fix 1: Table legs positioned at center instead of corners
@@ -2687,6 +2767,21 @@ class CriticAgent:
                 'required': ['.box('],
                 'forbidden': ['.sphere(', '.circle(', 'revolve'],
                 'error_msg': 'SEMANTIC ERROR: Prompt asks for BOX but code uses {method}. Use: cq.Workplane("XY").box(width, height, depth)'
+            },
+            'ring': {
+                'required': ['.circle(', '.extrude('],  # Ring = 2 circles + extrude
+                'forbidden': ['.box(', '.sphere(', 'revolve', 'loft'],
+                'error_msg': 'SEMANTIC ERROR: Prompt asks for RING/WASHER (annulus) but code uses {method}. Use: cq.Workplane("XY").circle(R_outer).circle(R_inner).extrude(thickness)'
+            },
+            'washer': {
+                'required': ['.circle(', '.extrude('],  # Washer = 2 circles + extrude
+                'forbidden': ['.box(', '.sphere(', 'revolve', 'loft'],
+                'error_msg': 'SEMANTIC ERROR: Prompt asks for WASHER/RING (annulus) but code uses {method}. Use: cq.Workplane("XY").circle(R_outer).circle(R_inner).extrude(thickness)'
+            },
+            'annulus': {
+                'required': ['.circle(', '.extrude('],  # Annulus = 2 circles + extrude
+                'forbidden': ['.box(', '.sphere(', 'revolve', 'loft'],
+                'error_msg': 'SEMANTIC ERROR: Prompt asks for ANNULUS but code uses {method}. Use: cq.Workplane("XY").circle(R_outer).circle(R_inner).extrude(thickness)'
             }
         }
 
