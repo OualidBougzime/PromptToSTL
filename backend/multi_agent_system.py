@@ -2024,22 +2024,99 @@ class SelfHealingAgent:
                 fixes_applied.add('glass_cutblind_fix')  # Mark as applied to avoid duplicate
                 log.info("🩹 Attempting semantic fix: Replace .extrude(-depth) with .cutBlind(-depth) for glass")
 
-                # Simple replacement: .extrude(- with .cutBlind(-
+                # Check if code uses chained syntax (which might not work with cutBlind)
+                # If so, convert to split syntax like user's working code
                 import re
-                # Replace .extrude(-NUMBER) with .cutBlind(-NUMBER) after .workplane().circle()
-                # Pattern: look for lines with .extrude(-
-                lines = fixed_code.split('\n')
-                for i, line in enumerate(lines):
-                    if '.extrude(-' in line and ('.workplane()' in fixed_code or i > 0):
-                        # Check if this is part of a hollow cut pattern (not the initial cylinder)
-                        # Usually the hollow cut comes after faces(">Z").workplane()
-                        prev_lines = '\n'.join(lines[max(0, i-5):i])
-                        if 'faces(' in prev_lines or '.workplane()' in prev_lines:
-                            # This is likely the hollow cut - replace extrude with cutBlind
-                            lines[i] = line.replace('.extrude(-', '.cutBlind(-')
-                            log.info(f"🩹 Replaced .extrude(- with .cutBlind(- on line {i+1}")
 
-                fixed_code = '\n'.join(lines)
+                # Try to detect chained glass pattern
+                # Look for: result = (cq.Workplane... with multiple method calls in parentheses
+                code_single_line = fixed_code.replace('\n', ' ')
+                is_chained = (
+                    'result = (cq.Workplane' in code_single_line and
+                    '.faces(">Z")' in code_single_line and
+                    '.workplane()' in code_single_line and
+                    ('.cutBlind(-' in code_single_line or '.extrude(-' in code_single_line)
+                )
+
+                if is_chained:
+                    log.info("🩹 Detected chained glass syntax - converting to split syntax")
+
+                    # Extract parameters from prompt
+                    r_out = 35.0
+                    r_in = 32.5
+                    height = 100.0
+                    bottom = 8.0
+                    fillet_r = 1.0
+
+                    # Extract from prompt: "outer cylinder radius 35 mm height 100 mm"
+                    outer_r_match = re.search(r'outer\s+cylinder\s+radius\s+(\d+(?:\.\d+)?)\s*mm', prompt, re.IGNORECASE)
+                    inner_r_match = re.search(r'inner\s+cylinder\s+radius\s+(\d+(?:\.\d+)?)\s*mm', prompt, re.IGNORECASE)
+                    height_match = re.search(r'height\s+(\d+(?:\.\d+)?)\s*mm', prompt, re.IGNORECASE)
+                    bottom_match = re.search(r'(\d+(?:\.\d+)?)\s*mm\s+(?:solid\s+)?bottom', prompt, re.IGNORECASE)
+                    fillet_match = re.search(r'fillet.*?(\d+(?:\.\d+)?)\s*mm', prompt, re.IGNORECASE)
+
+                    if outer_r_match:
+                        r_out = float(outer_r_match.group(1))
+                    if inner_r_match:
+                        r_in = float(inner_r_match.group(1))
+                    if height_match:
+                        height = float(height_match.group(1))
+                    if bottom_match:
+                        bottom = float(bottom_match.group(1))
+                    if fillet_match:
+                        fillet_r = float(fillet_match.group(1))
+
+                    # Generate glass code with split syntax (like user's working code)
+                    lines = fixed_code.split('\n')
+                    new_lines = []
+                    skip_until_export = False
+                    replaced = False
+
+                    for line in lines:
+                        # Find first 'result =' line
+                        if 'result =' in line and not replaced and 'result.faces' not in line and 'result.edges' not in line:
+                            skip_until_export = True
+                            indent_match = re.match(r'(\s*)', line)
+                            indent = indent_match.group(1) if indent_match else ''
+
+                            # Generate glass code with split syntax
+                            new_lines.append(f'{indent}# Drinking glass (fixed from chained syntax)')
+                            new_lines.append(f'{indent}# Outer cylinder')
+                            new_lines.append(f'{indent}result = cq.Workplane("XY").circle({r_out}).extrude({height})')
+                            new_lines.append(f'{indent}')
+                            new_lines.append(f'{indent}# Hollow interior, leaving {bottom}mm solid bottom')
+                            new_lines.append(f'{indent}result = result.faces(">Z").workplane().circle({r_in}).cutBlind(-({height} - {bottom}))')
+                            new_lines.append(f'{indent}')
+                            new_lines.append(f'{indent}# Fillet rim edges')
+                            new_lines.append(f'{indent}result = result.edges(">Z").fillet({fillet_r})')
+                            new_lines.append(f'{indent}')
+                            log.info(f"🩹 Generated glass: R_out={r_out}, R_in={r_in}, H={height}, bottom={bottom}")
+                            replaced = True
+                            continue
+
+                        # Skip all lines until export section
+                        if skip_until_export:
+                            if 'export' in line.lower() or 'Path' in line or 'output' in line:
+                                skip_until_export = False
+                                new_lines.append(line)
+                            else:
+                                continue
+                        else:
+                            new_lines.append(line)
+
+                    fixed_code = '\n'.join(new_lines)
+                else:
+                    # Simple replacement for non-chained syntax
+                    lines = fixed_code.split('\n')
+                    for i, line in enumerate(lines):
+                        if '.extrude(-' in line and ('.workplane()' in fixed_code or i > 0):
+                            # Check if this is part of a hollow cut pattern
+                            prev_lines = '\n'.join(lines[max(0, i-5):i])
+                            if 'faces(' in prev_lines or '.workplane()' in prev_lines:
+                                lines[i] = line.replace('.extrude(-', '.cutBlind(-')
+                                log.info(f"🩹 Replaced .extrude(- with .cutBlind(- on line {i+1}")
+
+                    fixed_code = '\n'.join(lines)
 
             # Semantic Fix 6: Spring needs Wire.makeHelix + sweep
             # Note: removed "extrude" from condition as it's too generic and conflicts with glass hollow fix
