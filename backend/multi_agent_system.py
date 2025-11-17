@@ -1516,7 +1516,7 @@ class SelfHealingAgent:
 
                 # Extract parameters from context if possible (fallback to defaults)
                 major_r = 50  # default major radius
-                minor_r = 10  # default minor radius
+                minor_r = 8  # default minor radius
 
                 # Try to extract from prompt or error
                 import re
@@ -1533,69 +1533,67 @@ class SelfHealingAgent:
                 if minor_match:
                     minor_r = int(minor_match.group(1))
 
-                # Replace wrong code with torus code
+                # Strategy: Find the variable assignment and replace entire multi-line chain
                 lines = fixed_code.split('\n')
                 new_lines = []
                 replaced = False
-                skip_until_index = -1
+                in_chain_to_replace = False
+                indent = ''
+                var_name = 'result'
 
                 for i, line in enumerate(lines):
-                    # Skip lines that are part of the chain we're replacing
-                    if i <= skip_until_index:
-                        continue
+                    # Look for lines that indicate start of wrong torus code
+                    if not replaced and not in_chain_to_replace:
+                        # Check if this line starts the wrong pattern
+                        if (('= (' in line or '=(' in line) and 'cq.Workplane' in line) or \
+                           ('.sphere(' in line) or \
+                           ('.revolve(' in line and '.moveTo(' not in line):
 
-                    # Check for .sphere() or .revolve() patterns to replace
-                    if not replaced and ('.sphere(' in line or ('.revolve(' in line and 'moveTo' not in fixed_code)):
-                        # Check if previous line(s) are part of multi-line chained statement
-                        # Remove them to avoid unclosed parenthesis (same logic as arc healer)
-                        removed_chain_start = False
-                        while new_lines:
-                            last_line = new_lines[-1].strip()
-                            if ('= (' in last_line and 'cq.Workplane' in last_line) or \
-                               last_line.endswith('(') or \
-                               (last_line.startswith('.') and len(new_lines[-1]) - len(new_lines[-1].lstrip()) > 0):
-                                log.info(f"🩹 Removing chained statement line: {new_lines[-1][:60]}...")
-                                if '=' in new_lines[-1] and not removed_chain_start:
-                                    indent_match = re.match(r'(\s*)', new_lines[-1])
-                                    indent = indent_match.group(1) if indent_match else ''
-                                    # Try to extract variable name
-                                    var_match = re.match(r'\s*(\w+)\s*=', new_lines[-1])
-                                    var_name = var_match.group(1) if var_match else 'result'
-                                    removed_chain_start = True
-                                new_lines.pop()
-                            else:
-                                break
-
-                        # If we didn't find chain start, extract from current line
-                        if not removed_chain_start:
-                            var_match = re.match(r'(\s*)(\w+)\s*=\s*', line)
+                            # Extract variable name and indent
+                            var_match = re.match(r'(\s*)(\w+)\s*=', line)
                             if var_match:
                                 indent = var_match.group(1)
                                 var_name = var_match.group(2)
                             else:
-                                indent = ''
-                                var_name = 'result'
+                                indent_match = re.match(r'(\s*)', line)
+                                indent = indent_match.group(1) if indent_match else ''
 
-                        # Find and skip following lines that are part of the chain
-                        for j in range(i + 1, len(lines)):
-                            next_line = lines[j].strip()
-                            if next_line.startswith('.') or (next_line.endswith(')') and next_line.count(')') > next_line.count('(')):
-                                skip_until_index = j
-                                log.info(f"🩹 Skipping following chain line: {lines[j][:60]}...")
-                                if next_line.endswith('))'):
-                                    break
-                            else:
-                                break
+                            # Mark that we're in a chain to replace
+                            in_chain_to_replace = True
+                            log.info(f"🩹 Found start of wrong torus pattern: {line[:60]}...")
+                            continue
 
-                        # Insert torus code (multi-line style matching user's pattern)
-                        new_lines.append(f'{indent}# Torus via revolve (fixed by SelfHealingAgent)')
-                        new_lines.append(f'{indent}{var_name} = (cq.Workplane("XY")')
-                        new_lines.append(f'{indent}          .moveTo({major_r}, 0).circle({minor_r})')
-                        new_lines.append(f'{indent}          .revolve(360, (0,0,0), (0,0,1)))')
-                        log.info(f"🩹 Replaced wrong pattern with torus revolve (major={major_r}, minor={minor_r})")
-                        replaced = True
-                    else:
-                        new_lines.append(line)
+                    # If we're in a chain to replace, skip lines until we find the end
+                    elif in_chain_to_replace:
+                        # Check if this line ends the chain
+                        stripped = line.strip()
+                        if stripped.endswith('))') or stripped.endswith(')') and not stripped.startswith('.'):
+                            # Found the end, insert correct code
+                            log.info(f"🩹 Found end of chain: {line[:60]}...")
+                            new_lines.append(f'{indent}# Torus via revolve (fixed by SelfHealingAgent)')
+                            new_lines.append(f'{indent}{var_name} = (cq.Workplane("XY")')
+                            new_lines.append(f'{indent}          .moveTo({major_r}, 0).circle({minor_r})')
+                            new_lines.append(f'{indent}          .revolve(360, (0,0,0), (0,0,1)))')
+                            log.info(f"🩹 Replaced wrong pattern with torus revolve (major={major_r}, minor={minor_r})")
+                            replaced = True
+                            in_chain_to_replace = False
+                            continue
+                        else:
+                            # Still in the chain, skip this line
+                            log.info(f"🩹 Skipping chain line: {line[:60]}...")
+                            continue
+
+                    # Normal line, keep it
+                    new_lines.append(line)
+
+                # If we finished the loop but are still in a chain (single-line pattern), insert the fix
+                if in_chain_to_replace and not replaced:
+                    new_lines.append(f'{indent}# Torus via revolve (fixed by SelfHealingAgent)')
+                    new_lines.append(f'{indent}{var_name} = (cq.Workplane("XY")')
+                    new_lines.append(f'{indent}          .moveTo({major_r}, 0).circle({minor_r})')
+                    new_lines.append(f'{indent}          .revolve(360, (0,0,0), (0,0,1)))')
+                    log.info(f"🩹 Replaced wrong pattern with torus revolve (major={major_r}, minor={minor_r})")
+
                 fixed_code = '\n'.join(new_lines)
 
             elif "SEMANTIC ERROR: Prompt asks for ARC" in error and 'arc_sector_fix' not in fixes_applied:
@@ -2817,7 +2815,7 @@ class CriticAgent:
             'torus': {
                 'required': ['revolve', '.moveTo('],  # Torus = profile.moveTo().circle().revolve()
                 'forbidden': ['.sphere(', '.box(', '.cylinder('],
-                'error_msg': 'SEMANTIC ERROR: Prompt asks for TORUS but code uses {method}. Use revolve pattern: profile = cq.Workplane("XZ").moveTo(major_r, 0).circle(minor_r); result = profile.revolve(360, (0,0,0), (0,1,0), clean=False)'
+                'error_msg': 'SEMANTIC ERROR: Prompt asks for TORUS but code uses {method}. Use revolve pattern: cq.Workplane("XY").moveTo(major_r, 0).circle(minor_r).revolve(360, (0,0,0), (0,0,1))'
             },
             'cone': {
                 'required': [],  # Will check manually for cone (loft OR extrude+taper OR .cone())
