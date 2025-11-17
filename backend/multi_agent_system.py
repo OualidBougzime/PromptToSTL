@@ -1475,31 +1475,65 @@ class SelfHealingAgent:
                 major_r = 50  # default major radius
                 minor_r = 10  # default minor radius
 
-                # Try to extract from prompt or code
+                # Try to extract from prompt or error
                 import re
-                major_match = re.search(r'major[_\s]*radius[:\s]*(\d+)', error.lower())
-                minor_match = re.search(r'minor[_\s]*radius[:\s]*(\d+)', error.lower())
+                # Try to extract from prompt first
+                prompt_lower = context.prompt.lower() if context and context.prompt else ""
+                major_match = re.search(r'major[_\s]*radius[:\s]*(\d+)', prompt_lower)
+                minor_match = re.search(r'minor[_\s]*radius[:\s]*(\d+)', prompt_lower)
+                if not major_match:
+                    major_match = re.search(r'major[_\s]*radius[:\s]*(\d+)', error.lower())
+                if not minor_match:
+                    minor_match = re.search(r'minor[_\s]*radius[:\s]*(\d+)', error.lower())
                 if major_match:
                     major_r = int(major_match.group(1))
                 if minor_match:
                     minor_r = int(minor_match.group(1))
 
-                # Replace sphere code with torus code
+                # Replace wrong code with torus code
                 lines = fixed_code.split('\n')
                 new_lines = []
+                replaced = False
+
                 for line in lines:
-                    if '.sphere(' in line:
-                        # Extract variable name if any
-                        var_match = re.match(r'(\s*)(\w+)\s*=\s*.*\.sphere\s*\(', line)
-                        if var_match:
-                            indent = var_match.group(1)
-                            var_name = var_match.group(2)
-                            new_lines.append(f'{indent}# Torus via revolve (fixed by SelfHealingAgent)')
-                            new_lines.append(f'{indent}profile = cq.Workplane("XZ").moveTo({major_r}, 0).circle({minor_r})')
-                            new_lines.append(f'{indent}{var_name} = profile.revolve(360, (0, 0, 0), (0, 1, 0), clean=False)')
-                            log.info(f"🩹 Replaced .sphere() with torus revolve pattern (major={major_r}, minor={minor_r})")
-                        else:
-                            new_lines.append(line)
+                    # Check for .sphere() or .revolve() patterns to replace
+                    if not replaced and ('.sphere(' in line or ('.revolve(' in line and 'moveTo' not in fixed_code)):
+                        # Check if previous line(s) are part of multi-line chained statement
+                        # Remove them to avoid unclosed parenthesis (same logic as arc healer)
+                        removed_chain_start = False
+                        while new_lines:
+                            last_line = new_lines[-1].strip()
+                            if ('= (' in last_line and 'cq.Workplane' in last_line) or \
+                               last_line.endswith('(') or \
+                               (last_line.startswith('.') and len(new_lines[-1]) - len(new_lines[-1].lstrip()) > 0):
+                                log.info(f"🩹 Removing chained statement line: {new_lines[-1][:60]}...")
+                                if '=' in new_lines[-1] and not removed_chain_start:
+                                    indent_match = re.match(r'(\s*)', new_lines[-1])
+                                    indent = indent_match.group(1) if indent_match else ''
+                                    # Try to extract variable name
+                                    var_match = re.match(r'\s*(\w+)\s*=', new_lines[-1])
+                                    var_name = var_match.group(1) if var_match else 'result'
+                                    removed_chain_start = True
+                                new_lines.pop()
+                            else:
+                                break
+
+                        # If we didn't find chain start, extract from current line
+                        if not removed_chain_start:
+                            var_match = re.match(r'(\s*)(\w+)\s*=\s*', line)
+                            if var_match:
+                                indent = var_match.group(1)
+                                var_name = var_match.group(2)
+                            else:
+                                indent = ''
+                                var_name = 'result'
+
+                        # Insert torus code
+                        new_lines.append(f'{indent}# Torus via revolve (fixed by SelfHealingAgent)')
+                        new_lines.append(f'{indent}profile = cq.Workplane("XZ").moveTo({major_r}, 0).circle({minor_r})')
+                        new_lines.append(f'{indent}{var_name} = profile.revolve(360, (0, 0, 0), (0, 1, 0), clean=False)')
+                        log.info(f"🩹 Replaced wrong pattern with torus revolve (major={major_r}, minor={minor_r})")
+                        replaced = True
                     else:
                         new_lines.append(line)
                 fixed_code = '\n'.join(new_lines)
