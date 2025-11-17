@@ -33,10 +33,14 @@ SHAPE IDENTIFICATION EXAMPLES:
 - "pipe" → object: "pipe", operations: ["circle", "extrude", "cut", "chamfer"]
 - "hemispherical bowl" → object: "bowl", operations: ["sphere", "split", "shell", "fillet"]
 - "screw without threads" → object: "screw", operations: ["circle", "extrude", "polygon", "union", "chamfer"]
+- "cone" → object: "cone", operations: ["circle", "extrude_with_taper"]
+- "torus" → object: "torus", operations: ["moveTo", "circle", "revolve"]
 
 IMPORTANT CONSTRAINTS:
 - For HOLLOW objects (pipe, tube, glass, vase, bowl): operations MUST include "cut" or "shell"
-- For LOFT objects (vase, cone): do NOT include "revolve" - choose ONE method
+- For LOFT objects (vase): do NOT include "revolve" - choose ONE method
+- For CONE: use circle().extrude(h, taper=calculated_angle), NOT loft or revolve
+- For TORUS: use XY workplane + moveTo(major_r, 0) + circle(minor_r) + revolve(360, (0,0,0), (0,0,1))
 - For SPRING: use Wire.makeHelix, NOT Workplane.helix (which doesn't exist)
 - For TABLE: leg positions must be at CORNERS, calculate from dimensions
 - For REVOLVE objects (torus, bowl): profile must be 2D and closed
@@ -66,13 +70,15 @@ VALID OPERATIONS (use ONLY these):
 
 CRITICAL RULES:
 1. NEVER use: placeSketch, copy, helix (on Workplane), cylinder, cone, torus, cutThruAll (unless you provide pending wire first)
-2. revolve: ONLY use if you have an EXPLICIT closed 2D profile (lineTo, arc, close). NEVER use with moveTo after circle!
+2. revolve: ONLY use if you have an EXPLICIT closed 2D profile (lineTo, arc, close). For torus: use moveTo + circle + revolve around Z-axis
 3. cut: Only AFTER creating a pending sketch (circle/rect) on a selected face, then extrude negative
 4. For helical spring: {"op": "makeHelix", "args": {"pitch": P, "height": H, "radius": R}}, then {"op": "sweep", "args": {"isFrenet": true}}
 5. For pipe: outer solid first, then select top face, create inner circle, extrude negative
 6. For vase with varying radii: ALWAYS use LOFT (circle + workplane(offset=h1) + circle + workplane(offset=h2) + circle + loft), NEVER revolve
 7. For bowl: Either (A) sphere + split + shell OR (B) revolve a closed half-disk (choose A if unsure)
 8. For screw (no threads): shaft cylinder, then hex head with polygon(6, diameter=2*circumradius), then union
+9. For cone: MUST calculate taper angle as -math.degrees(math.atan2(radius, height)), NEVER use taper=-1 or fixed values
+10. For torus: MUST use XY workplane and Z-axis (0,0,1) for revolve, NOT XZ plane or Y-axis
 
 PATTERN-SPECIFIC PLANS:
 
@@ -123,6 +129,24 @@ BOWL (sphere_r=40, wall=3, rim_fillet=1):
   {"op":"shell","args":{"t":3},"comment":"hollow"},
   {"op":"select","args":{"edges":">Z"},"comment":"rim"},
   {"op":"fillet","args":{"r":1},"comment":"rim fillet"}
+]
+
+CONE (base_diameter=50, height=60):
+CRITICAL: Use extrude with calculated taper angle, NOT taper=-1!
+[
+  {"op":"workplane","args":{"plane":"XY"},"comment":"base"},
+  {"op":"circle","args":{"r":25},"comment":"base circle (radius = diameter/2)"},
+  {"op":"extrude","args":{"h":60,"taper":"calculated"},"comment":"taper = -atan2(r,h) in degrees"}
+]
+Note: taper angle must be calculated as: -math.degrees(math.atan2(radius, height))
+
+TORUS (major_radius=50, minor_radius=8):
+CRITICAL: Use XY workplane and Z-axis (0,0,1) for revolve, NOT XZ plane!
+[
+  {"op":"workplane","args":{"plane":"XY"},"comment":"XY plane (NOT XZ)"},
+  {"op":"moveTo","args":{"x":50,"y":0},"comment":"move to major radius"},
+  {"op":"circle","args":{"r":8},"comment":"tube cross-section"},
+  {"op":"revolve","args":{"angle":360,"axisStart":[0,0,0],"axisEnd":[0,0,1]},"comment":"revolve around Z-axis"}
 ]
 
 VASE (r1=30 at z=0, r2=22 at z=60, r3=35 at z=120, wall=3):
@@ -350,6 +374,51 @@ result = top
 for x, y in leg_positions:
     leg = cq.Workplane("XY").center(x, y).circle(6).extrude(120)
     result = result.union(leg)
+
+# Export
+output_dir = Path(__file__).parent / "output"
+output_dir.mkdir(exist_ok=True)
+output_path = output_dir / "generated_cot_generated.stl"
+cq.exporters.export(result, str(output_path))
+print(f"✅ STL exported to: {output_path}")
+```
+
+CONE (tapered cylinder):
+```python
+import cadquery as cq
+from pathlib import Path
+import math
+
+# CRITICAL: Use proper taper angle calculation for cone
+BASE_D = 50.0  # base diameter in mm
+H = 60.0       # height in mm
+R = BASE_D / 2.0  # base radius
+
+# Calculate taper angle: negative = narrows toward top
+taper_deg = -math.degrees(math.atan2(R, H))
+
+result = cq.Workplane("XY").circle(R).extrude(H, taper=taper_deg)
+
+# Export
+output_dir = Path(__file__).parent / "output"
+output_dir.mkdir(exist_ok=True)
+output_path = output_dir / "generated_cot_generated.stl"
+cq.exporters.export(result, str(output_path))
+print(f"✅ STL exported to: {output_path}")
+```
+
+TORUS (donut shape):
+```python
+import cadquery as cq
+from pathlib import Path
+
+R_MAJOR = 50.0  # major radius (center to tube center)
+R_MINOR = 8.0   # minor radius (tube radius)
+
+# CRITICAL: Use XY workplane and Z-axis for revolve
+result = (cq.Workplane("XY")
+    .moveTo(R_MAJOR, 0).circle(R_MINOR)
+    .revolve(360, (0, 0, 0), (0, 0, 1)))
 
 # Export
 output_dir = Path(__file__).parent / "output"
