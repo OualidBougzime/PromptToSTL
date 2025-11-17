@@ -1504,7 +1504,8 @@ class SelfHealingAgent:
                         new_lines.append(line)
                 fixed_code = '\n'.join(new_lines)
 
-            elif "SEMANTIC ERROR: Prompt asks for ARC" in error:
+            elif "SEMANTIC ERROR: Prompt asks for ARC" in error and 'arc_sector_fix' not in fixes_applied:
+                fixes_applied.add('arc_sector_fix')  # Mark as applied to avoid duplicate
                 log.info("🩹 Attempting semantic fix: Replace wrong code with annular sector (portion de couronne)")
 
                 # Extract parameters from prompt/error
