@@ -2019,10 +2019,13 @@ class SelfHealingAgent:
 
                 fixed_code = '\n'.join(lines)
 
-            # Semantic Fix 5.7: Glass hollow - replace extrude(-) with cutBlind(-)
-            if "cutBlind" in error and "extrude(-depth)" in error and 'glass_cutblind_fix' not in fixes_applied:
+            # Semantic Fix 5.7: Glass hollow - replace extrude(-) with cutBlind(-) OR generate proper glass code
+            # Trigger conditions:
+            # 1. Error contains "cutBlind" and "extrude(-depth)" -> replace extrude with cutBlind
+            # 2. Error contains "Glass must be hollow" -> generate proper glass code
+            if (("cutBlind" in error and "extrude(-depth)" in error) or ("Glass must be hollow" in error and "glass" in prompt.lower())) and 'glass_cutblind_fix' not in fixes_applied:
                 fixes_applied.add('glass_cutblind_fix')  # Mark as applied to avoid duplicate
-                log.info("🩹 Attempting semantic fix: Replace .extrude(-depth) with .cutBlind(-depth) for glass")
+                log.info("🩹 Attempting semantic fix: Generate proper glass code with .cutBlind()")
 
                 # Check if code uses chained syntax (which might not work with cutBlind)
                 # If so, convert to split syntax like user's working code
@@ -2038,7 +2041,10 @@ class SelfHealingAgent:
                     ('.cutBlind(-' in code_single_line or '.extrude(-' in code_single_line)
                 )
 
-                if is_chained:
+                # Check if hollow cut is completely missing
+                has_hollow_cut = '.cutBlind(' in fixed_code or ('.faces(">Z")' in fixed_code and '.workplane()' in fixed_code)
+
+                if is_chained or not has_hollow_cut:
                     log.info("🩹 Detected chained glass syntax - converting to split syntax")
 
                     # Extract parameters from prompt
