@@ -1572,7 +1572,8 @@ class SelfHealingAgent:
                             continue
 
                     # Detect start of wrong shape creation code (any primitive that's not annular sector)
-                    if not replaced and ('.circle(' in line or '.extrude(' in line or 'revolve' in line or '.sweep(' in line or '.box(' in line or '.sphere(' in line or '.cylinder(' in line):
+                    # Include threePointArc and radiusArc since those are the problematic arc methods
+                    if not replaced and ('.circle(' in line or '.extrude(' in line or 'revolve' in line or '.sweep(' in line or '.box(' in line or '.sphere(' in line or '.cylinder(' in line or '.threePointArc(' in line or '.radiusArc(' in line):
                         # Check if previous line(s) are part of multi-line chained statement
                         # (e.g., "result = (cq.Workplane("XY")" before ".box(50, 50, 50))")
                         # If so, remove them to avoid unclosed parenthesis
