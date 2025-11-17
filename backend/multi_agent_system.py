@@ -1508,8 +1508,13 @@ class SelfHealingAgent:
                 lines = fixed_code.split('\n')
                 new_lines = []
                 replaced = False
+                skip_until_index = -1
 
-                for line in lines:
+                for i, line in enumerate(lines):
+                    # Skip lines that are part of the chain we're replacing
+                    if i <= skip_until_index:
+                        continue
+
                     # Check for .sphere() or .revolve() patterns to replace
                     if not replaced and ('.sphere(' in line or ('.revolve(' in line and 'moveTo' not in fixed_code)):
                         # Check if previous line(s) are part of multi-line chained statement
@@ -1541,6 +1546,17 @@ class SelfHealingAgent:
                             else:
                                 indent = ''
                                 var_name = 'result'
+
+                        # Find and skip following lines that are part of the chain
+                        for j in range(i + 1, len(lines)):
+                            next_line = lines[j].strip()
+                            if next_line.startswith('.') or (next_line.endswith(')') and next_line.count(')') > next_line.count('(')):
+                                skip_until_index = j
+                                log.info(f"🩹 Skipping following chain line: {lines[j][:60]}...")
+                                if next_line.endswith('))'):
+                                    break
+                            else:
+                                break
 
                         # Insert torus code (multi-line style matching user's pattern)
                         new_lines.append(f'{indent}# Torus via revolve (fixed by SelfHealingAgent)')
@@ -1722,9 +1738,14 @@ class SelfHealingAgent:
                 new_lines = []
                 result_var = 'result'  # default
                 replaced = False
+                skip_until_index = -1
 
                 # Rebuild with cone loft pattern
                 for i, line in enumerate(lines):
+                    # Skip lines that are part of the chain we're replacing
+                    if i <= skip_until_index:
+                        continue
+
                     # Skip wrong shape creation lines (including .cylinder() hallucination)
                     if not replaced and ('.circle(' in line or '.revolve(' in line or '.extrude(' in line or '.cylinder(' in line):
                         if 'loft' not in fixed_code:  # Only replace if no loft exists
@@ -1746,6 +1767,17 @@ class SelfHealingAgent:
 
                             indent_match = re.match(r'(\s*)', line)
                             indent = indent_match.group(1) if indent_match else ''
+
+                            # Find and skip following lines that are part of the chain
+                            for j in range(i + 1, len(lines)):
+                                next_line = lines[j].strip()
+                                if next_line.startswith('.') or (next_line.endswith(')') and next_line.count(')') > next_line.count('(')):
+                                    skip_until_index = j
+                                    log.info(f"🩹 Skipping following chain line: {lines[j][:60]}...")
+                                    if next_line.endswith('))'):
+                                        break
+                                else:
+                                    break
 
                             # Insert correct cone code (using extrude with taper)
                             # Calculate taper angle: taper_deg = -atan2(radius, height) converted to degrees
@@ -1855,8 +1887,13 @@ class SelfHealingAgent:
                 new_lines = []
                 result_var = 'result'
                 replaced = False
+                skip_until_index = -1
 
-                for line in lines:
+                for i, line in enumerate(lines):
+                    # Skip lines that are part of the chain we're replacing
+                    if i <= skip_until_index:
+                        continue
+
                     if not replaced and ('.box(' in line or ('.circle(' in line and '.extrude(' not in fixed_code)):
                         # Remove multi-line chained statements (same as other healers)
                         removed_chain_start = False
@@ -1876,6 +1913,17 @@ class SelfHealingAgent:
 
                         indent_match = re.match(r'(\s*)', line)
                         indent = indent_match.group(1) if indent_match else ''
+
+                        # Find and skip following lines that are part of the chain
+                        for j in range(i + 1, len(lines)):
+                            next_line = lines[j].strip()
+                            if next_line.startswith('.') or (next_line.endswith(')') and next_line.count(')') > next_line.count('(')):
+                                skip_until_index = j
+                                log.info(f"🩹 Skipping following chain line: {lines[j][:60]}...")
+                                if next_line.endswith('))'):
+                                    break
+                            else:
+                                break
 
                         # Insert ring/washer code
                         new_lines.append(f'{indent}# Ring/Washer (annulus) via two circles + extrude (fixed by SelfHealingAgent)')
