@@ -1638,6 +1638,120 @@ class SelfHealingAgent:
 
                 fixed_code = '\n'.join(new_lines)
 
+            # Semantic Fix 0b: Sphere with circle + extrude → sphere
+            elif "SEMANTIC ERROR: Prompt asks for SPHERE but code uses .circle(" in error and 'sphere_fix' not in fixes_applied:
+                fixes_applied.add('sphere_fix')  # Mark as applied to avoid duplicate
+                log.info("🩹 Attempting semantic fix: Replace circle + extrude with sphere()")
+
+                # Extract radius from prompt (handle both radius and diameter)
+                import re
+                radius = 40  # default radius
+                prompt_lower = context.prompt.lower() if context and context.prompt else ""
+
+                # Try to extract diameter first (sphere diameter 80 mm → radius 40)
+                diameter_match = re.search(r'diameter[:\s]*(\d+)', prompt_lower)
+                if diameter_match:
+                    radius = int(diameter_match.group(1)) // 2
+                    log.info(f"🩹 Extracted diameter {int(diameter_match.group(1))} → radius {radius}")
+                else:
+                    # Try radius
+                    radius_match = re.search(r'radius[:\s]*(\d+)', prompt_lower)
+                    if radius_match:
+                        radius = int(radius_match.group(1))
+                        log.info(f"🩹 Extracted radius {radius}")
+
+                # Strategy: Replace entire .circle(...).extrude(...) chain with .sphere(radius)
+                lines = fixed_code.split('\n')
+                new_lines = []
+                replaced = False
+                in_chain_to_replace = False
+                has_opening_paren = False
+                indent = ''
+                var_name = 'result'
+
+                for i, line in enumerate(lines):
+                    # Look for start of wrong sphere code (circle + extrude pattern)
+                    if not replaced and not in_chain_to_replace:
+                        # Check if this is an assignment with opening paren (multi-line chain)
+                        if ('= (' in line or '=(' in line) and 'cq.Workplane' in line:
+                            # This is the start of a multi-line chain like: result = (cq.Workplane("XY")
+                            var_match = re.match(r'(\s*)(\w+)\s*=', line)
+                            if var_match:
+                                indent = var_match.group(1)
+                                var_name = var_match.group(2)
+                            has_opening_paren = True
+                            in_chain_to_replace = True
+                            log.info(f"🩹 Found start of multi-line sphere pattern: {line[:60]}...")
+                            continue
+                        # Check if this line has .circle in it (part of the wrong pattern)
+                        elif '.circle(' in line:
+                            # Check if assignment starts here
+                            if '=' in line:
+                                var_match = re.match(r'(\s*)(\w+)\s*=', line)
+                                if var_match:
+                                    indent = var_match.group(1)
+                                    var_name = var_match.group(2)
+                                in_chain_to_replace = True
+                                log.info(f"🩹 Found start of wrong sphere pattern (circle): {line[:60]}...")
+                                continue
+                            else:
+                                # Chained call like .circle(...) without assignment
+                                in_chain_to_replace = True
+                                indent_match = re.match(r'(\s*)', line)
+                                indent = indent_match.group(1) if indent_match else ''
+                                log.info(f"🩹 Found chained circle call: {line[:60]}...")
+                                continue
+
+                    # If we're in a chain to replace, skip until we find the extrude or end
+                    elif in_chain_to_replace:
+                        stripped = line.strip()
+
+                        # Skip blank lines and comments
+                        if not stripped or stripped.startswith('#'):
+                            log.info(f"🩹 Skipping blank/comment line in chain: {line[:60]}...")
+                            continue
+
+                        # Check if this line has extrude (the end of the pattern we're replacing)
+                        if '.extrude(' in line:
+                            # This is the extrude call - replace the whole chain with sphere
+                            log.info(f"🩹 Found extrude, replacing chain with sphere: {line[:60]}...")
+                            new_lines.append(f'{indent}# Sphere (fixed by SelfHealingAgent)')
+                            if has_opening_paren:
+                                new_lines.append(f'{indent}{var_name} = cq.Workplane("XY").sphere({radius})')
+                            else:
+                                new_lines.append(f'{indent}{var_name} = cq.Workplane("XY").sphere({radius})')
+                            log.info(f"🩹 Replaced circle + extrude with sphere(radius={radius})")
+                            replaced = True
+                            in_chain_to_replace = False
+                            continue
+
+                        # If line starts with '.', it's a chained call - skip it
+                        if stripped.startswith('.'):
+                            log.info(f"🩹 Skipping chained call: {line[:60]}...")
+                            continue
+                        else:
+                            # Not a chain anymore, insert fix and keep this line
+                            log.info(f"🩹 End of chain reached at non-chain line, keeping: {line[:60]}...")
+                            new_lines.append(f'{indent}# Sphere (fixed by SelfHealingAgent)')
+                            new_lines.append(f'{indent}{var_name} = cq.Workplane("XY").sphere({radius})')
+                            log.info(f"🩹 Replaced circle pattern with sphere(radius={radius})")
+                            replaced = True
+                            in_chain_to_replace = False
+                            # Keep this line
+                            new_lines.append(line)
+                            continue
+
+                    # Normal line, keep it
+                    new_lines.append(line)
+
+                # If we finished but didn't find extrude, still replace
+                if in_chain_to_replace and not replaced:
+                    new_lines.append(f'{indent}# Sphere (fixed by SelfHealingAgent)')
+                    new_lines.append(f'{indent}{var_name} = cq.Workplane("XY").sphere({radius})')
+                    log.info(f"🩹 Replaced circle pattern with sphere(radius={radius})")
+
+                fixed_code = '\n'.join(new_lines)
+
             elif "SEMANTIC ERROR: Prompt asks for ARC" in error and 'arc_sector_fix' not in fixes_applied:
                 fixes_applied.add('arc_sector_fix')  # Mark as applied to avoid duplicate
                 log.info("🩹 Attempting semantic fix: Replace wrong code with annular sector (portion de couronne)")
