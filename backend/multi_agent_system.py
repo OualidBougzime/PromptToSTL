@@ -1515,12 +1515,21 @@ class SelfHealingAgent:
                 start_deg = 0     # default start angle
 
                 import re
-                # Try to extract from error or use defaults
-                radius_match = re.search(r'radius[:\s]*(\d+)', error.lower())
-                angle_match = re.search(r'(?:sweep|angle)[:\s]*(\d+)', error.lower())
+                # Try to extract from prompt first, then error, or use defaults
+                prompt_lower = context.prompt.lower() if context and context.prompt else ""
+
+                # Extract radius from prompt or error
+                radius_match = re.search(r'radius[:\s]*(\d+)', prompt_lower)
+                if not radius_match:
+                    radius_match = re.search(r'radius[:\s]*(\d+)', error.lower())
                 if radius_match:
                     R_ext = int(radius_match.group(1))
                     R_int = int(R_ext * 0.83)  # Inner radius ~83% of outer
+
+                # Extract angle from prompt or error
+                angle_match = re.search(r'(?:sweep|angle)[:\s]*(\d+)', prompt_lower)
+                if not angle_match:
+                    angle_match = re.search(r'(?:sweep|angle)[:\s]*(\d+)', error.lower())
                 if angle_match:
                     theta_deg = int(angle_match.group(1))
 
@@ -2483,6 +2492,10 @@ class CriticAgent:
         if screw_issue:
             issues.append(screw_issue)
 
+        arc_issue = self._check_arc_pattern(code, prompt)
+        if arc_issue:
+            issues.append(arc_issue)
+
         # Analyse 1 : Tables avec pieds mal positionnés
         if any(keyword in prompt.lower() for keyword in ["table", "desk", "stand"]):
             leg_issue = self._check_table_legs(code, prompt)
@@ -2947,6 +2960,40 @@ class CriticAgent:
         # Check for union
         if ".union(" not in code:
             return "SEMANTIC ERROR: Screw needs .union() to join shaft and head"
+
+        return None
+
+    def _check_arc_pattern(self, code: str, prompt: str) -> Optional[str]:
+        """
+        Vérifie le pattern spécifique pour un arc (annular sector / portion de couronne)
+        """
+        prompt_lower = prompt.lower()
+
+        # Check if prompt asks for arc
+        if "arc" not in prompt_lower and "annular" not in prompt_lower and "sector" not in prompt_lower:
+            return None
+
+        # Arc = annular sector (portion de couronne)
+        # MUST use Edge.makeCircle + Wire.assembleEdges approach
+        # NOT threePointArc, radiusArc, or simple revolve
+
+        # Check for problematic methods that don't work for arcs
+        if ".threePointArc(" in code:
+            return "SEMANTIC ERROR: Prompt asks for ARC (annular sector / portion de couronne) but code uses threePointArc which fails. Use Edge.makeCircle() + Wire.assembleEdges() pattern"
+
+        if ".radiusArc(" in code:
+            return "SEMANTIC ERROR: Prompt asks for ARC (annular sector / portion de couronne) but code uses radiusArc which fails. Use Edge.makeCircle() + Wire.assembleEdges() pattern"
+
+        # Check for correct pattern
+        if "Edge.makeCircle" not in code and "makeCircle" not in code:
+            return "SEMANTIC ERROR: Prompt asks for ARC (annular sector / portion de couronne) but code missing Edge.makeCircle(). Use: Edge.makeCircle(R, center, normal, angle1, angle2) to create circular arcs"
+
+        if "Wire.assembleEdges" not in code and "assembleEdges" not in code:
+            return "SEMANTIC ERROR: Arc needs Wire.assembleEdges([edges]) to create closed wires from circular arcs and radial lines"
+
+        # Arc should create outer and inner wires then subtract
+        if ".cut(" not in code:
+            return "SEMANTIC ERROR: Arc needs .cut() to subtract inner solid from outer solid"
 
         return None
 
