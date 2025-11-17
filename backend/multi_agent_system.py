@@ -2635,7 +2635,7 @@ class CriticAgent:
                 'error_msg': 'SEMANTIC ERROR: Prompt asks for ARC (annular sector / portion de couronne) but code uses {method}. Use annular sector pattern: moveTo(R_ext, 0) → threePointArc(outer) → lineTo(R_int) → threePointArc(inner) → close() → extrude()'
             },
             'torus': {
-                'required': ['revolve', 'moveTo'],  # Torus = profile.moveTo().circle().revolve()
+                'required': ['revolve', '.moveTo('],  # Torus = profile.moveTo().circle().revolve()
                 'forbidden': ['.sphere(', '.box(', '.cylinder('],
                 'error_msg': 'SEMANTIC ERROR: Prompt asks for TORUS but code uses {method}. Use revolve pattern: profile = cq.Workplane("XZ").moveTo(major_r, 0).circle(minor_r); result = profile.revolve(360, (0,0,0), (0,1,0), clean=False)'
             },
