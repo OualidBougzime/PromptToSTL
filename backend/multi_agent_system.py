@@ -1080,6 +1080,20 @@ class SelfHealingAgent:
         fixed_code = code
         prompt = context.prompt if hasattr(context, 'prompt') else ""
 
+        # Fix 0: Remove emojis from code (causes encoding errors on Windows)
+        # Remove all emoji characters that can't be encoded in charmap
+        emoji_pattern = re.compile("["
+            u"\U0001F600-\U0001F64F"  # emoticons
+            u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+            u"\U0001F680-\U0001F6FF"  # transport & map symbols
+            u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+            u"\U00002702-\U000027B0"  # dingbats
+            u"\U000024C2-\U0001F251"
+            u"\u2705"  # ✅ check mark
+            u"\u274C"  # ❌ cross mark
+            "]+", flags=re.UNICODE)
+        fixed_code = emoji_pattern.sub('', fixed_code)
+
         # Track which fixes have been applied to avoid duplicate work
         fixes_applied = set()
 
@@ -1682,13 +1696,21 @@ class SelfHealingAgent:
             elif "SEMANTIC ERROR: Prompt asks for CONE but code uses" in error:
                 log.info("🩹 Attempting semantic fix: Replace cylinder/wrong pattern with cone loft")
 
-                # Extract parameters
+                # Extract parameters from prompt first, then error
+                prompt_lower = context.prompt.lower() if context and context.prompt else ""
                 base_radius = 25  # default
                 height = 50  # default
 
                 import re
-                base_match = re.search(r'(?:base|bottom)[_\s]*(?:diameter|radius)[:\s]*(\d+)', error.lower())
-                height_match = re.search(r'height[:\s]*(\d+)', error.lower())
+                # Try prompt first
+                base_match = re.search(r'(?:base|bottom)[_\s]*(?:diameter|radius)[:\s]*(\d+)', prompt_lower)
+                height_match = re.search(r'height[:\s]*(\d+)', prompt_lower)
+                # Fallback to error
+                if not base_match:
+                    base_match = re.search(r'(?:base|bottom)[_\s]*(?:diameter|radius)[:\s]*(\d+)', error.lower())
+                if not height_match:
+                    height_match = re.search(r'height[:\s]*(\d+)', error.lower())
+
                 if base_match:
                     base_radius = int(base_match.group(1)) / 2  # diameter to radius
                 if height_match:
@@ -1700,20 +1722,27 @@ class SelfHealingAgent:
                 result_var = 'result'  # default
                 replaced = False
 
-                # Find the result variable
-                for line in lines:
-                    if '=' in line and ('circle' in line.lower() or 'revolve' in line.lower() or 'extrude' in line.lower()):
-                        var_match = re.match(r'(\s*)(\w+)\s*=\s*', line)
-                        if var_match:
-                            result_var = var_match.group(2)
-                        break
-
                 # Rebuild with cone loft pattern
-                skip_shape_creation = False
                 for i, line in enumerate(lines):
                     # Skip wrong shape creation lines (including .cylinder() hallucination)
                     if not replaced and ('.circle(' in line or '.revolve(' in line or '.extrude(' in line or '.cylinder(' in line):
                         if 'loft' not in fixed_code:  # Only replace if no loft exists
+                            # Remove multi-line chained statements (same as arc/torus)
+                            removed_chain_start = False
+                            while new_lines:
+                                last_line = new_lines[-1].strip()
+                                if ('= (' in last_line and 'cq.Workplane' in last_line) or \
+                                   last_line.endswith('(') or \
+                                   (last_line.startswith('.') and len(new_lines[-1]) - len(new_lines[-1].lstrip()) > 0):
+                                    log.info(f"🩹 Removing chained statement line: {new_lines[-1][:60]}...")
+                                    if '=' in new_lines[-1] and not removed_chain_start:
+                                        var_match = re.match(r'\s*(\w+)\s*=', new_lines[-1])
+                                        result_var = var_match.group(1) if var_match else 'result'
+                                        removed_chain_start = True
+                                    new_lines.pop()
+                                else:
+                                    break
+
                             indent_match = re.match(r'(\s*)', line)
                             indent = indent_match.group(1) if indent_match else ''
 
@@ -1726,13 +1755,7 @@ class SelfHealingAgent:
                             new_lines.append(f'{indent}    .loft())')
                             log.info(f"🩹 Replaced wrong pattern with cone loft (base_r={base_radius}, h={height})")
                             replaced = True
-                            skip_shape_creation = True
                             continue
-                    elif skip_shape_creation and ('revolve' in line or 'extrude' in line):
-                        # Skip continuation of wrong pattern
-                        continue
-                    else:
-                        skip_shape_creation = False
 
                     new_lines.append(line)
                 fixed_code = '\n'.join(new_lines)
