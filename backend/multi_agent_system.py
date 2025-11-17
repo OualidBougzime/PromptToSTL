@@ -2019,8 +2019,31 @@ class SelfHealingAgent:
 
                 fixed_code = '\n'.join(lines)
 
+            # Semantic Fix 5.7: Glass hollow - replace extrude(-) with cutBlind(-)
+            if "cutBlind" in error and "extrude(-depth)" in error and 'glass_cutblind_fix' not in fixes_applied:
+                fixes_applied.add('glass_cutblind_fix')  # Mark as applied to avoid duplicate
+                log.info("🩹 Attempting semantic fix: Replace .extrude(-depth) with .cutBlind(-depth) for glass")
+
+                # Simple replacement: .extrude(- with .cutBlind(-
+                import re
+                # Replace .extrude(-NUMBER) with .cutBlind(-NUMBER) after .workplane().circle()
+                # Pattern: look for lines with .extrude(-
+                lines = fixed_code.split('\n')
+                for i, line in enumerate(lines):
+                    if '.extrude(-' in line and ('.workplane()' in fixed_code or i > 0):
+                        # Check if this is part of a hollow cut pattern (not the initial cylinder)
+                        # Usually the hollow cut comes after faces(">Z").workplane()
+                        prev_lines = '\n'.join(lines[max(0, i-5):i])
+                        if 'faces(' in prev_lines or '.workplane()' in prev_lines:
+                            # This is likely the hollow cut - replace extrude with cutBlind
+                            lines[i] = line.replace('.extrude(-', '.cutBlind(-')
+                            log.info(f"🩹 Replaced .extrude(- with .cutBlind(- on line {i+1}")
+
+                fixed_code = '\n'.join(lines)
+
             # Semantic Fix 6: Spring needs Wire.makeHelix + sweep
-            if "SEMANTIC ERROR" in error and ("spring" in error.lower() or "helix" in error.lower() or "sweep" in error.lower() or "extrude" in error.lower() or "turns" in error.lower() or "pitch" in error.lower()) and 'spring_helix_fix' not in fixes_applied:
+            # Note: removed "extrude" from condition as it's too generic and conflicts with glass hollow fix
+            if "SEMANTIC ERROR" in error and ("spring" in error.lower() or "helix" in error.lower() or "sweep" in error.lower() or "turns" in error.lower() or "pitch" in error.lower() or "coil" in error.lower()) and 'spring_helix_fix' not in fixes_applied:
                 fixes_applied.add('spring_helix_fix')  # Mark as applied to avoid duplicate
                 log.info("🩹 Attempting semantic fix: Generate Wire.makeHelix + sweep for spring")
 
@@ -2639,17 +2662,26 @@ class CriticAgent:
         Vérifie le pattern spécifique pour un verre (glass)
         """
         prompt_lower = prompt.lower()
-        if "glass" not in prompt_lower and "drinking" not in prompt_lower:
+        if "glass" not in prompt_lower and "drinking" not in prompt_lower and "cup" not in prompt_lower:
             return None
 
         # Glass = outer cylinder + inner cut from top + fillet rim
-        # MUST have: circle().extrude() for outer, then faces(">Z").workplane().circle().extrude(-depth)
+        # MUST have: circle().extrude() for outer, then faces(">Z").workplane().circle().cutBlind(-depth)
         if ".circle(" not in code or ".extrude(" not in code:
             return "SEMANTIC ERROR: Glass needs .circle().extrude() pattern"
 
-        # Check for hollow structure
-        if ".cut(" not in code and "shell(" not in code and "extrude(-" not in code:
-            return "SEMANTIC ERROR: Glass must be hollow (needs inner cut with negative extrude)"
+        # Check for hollow structure - MUST use cutBlind() not extrude()
+        # extrude(-X) doesn't properly cut, it creates wrong geometry
+        if ".workplane()" in code and ".circle(" in code:
+            # Look for extrude(-...) after workplane().circle() pattern
+            import re
+            # Pattern: workplane() ... circle(...) ... extrude(-...)
+            if re.search(r'\.workplane\(\).*\.circle\([^)]+\).*\.extrude\(-', code):
+                return "SEMANTIC ERROR: Glass hollow must use .cutBlind(-depth), not .extrude(-depth). Use: .workplane().circle(R_in).cutBlind(-(height - bottom))"
+
+        # If no cutBlind and no proper cut method found
+        if ".cutBlind(" not in code and ".cut(" not in code and "shell(" not in code:
+            return "SEMANTIC ERROR: Glass must be hollow (use .cutBlind(-depth) to cut from top)"
 
         # Check rim fillet
         if "fillet" in prompt_lower and ".fillet(" not in code:
