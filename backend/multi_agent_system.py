@@ -1540,6 +1540,7 @@ class SelfHealingAgent:
                 new_lines = []
                 replaced = False
                 in_chain_to_replace = False
+                has_opening_paren = False  # Track if chain has opening paren
                 indent = ''
                 var_name = 'result'
 
@@ -1547,10 +1548,21 @@ class SelfHealingAgent:
                     # Look for lines that indicate start of wrong torus code
                     if not replaced and not in_chain_to_replace:
                         # Check if this line starts the wrong pattern
-                        if (('= (' in line or '=(' in line) and 'cq.Workplane' in line) or \
-                           ('.sphere(' in line) or \
-                           ('.revolve(' in line and '.moveTo(' not in line):
-
+                        if (('= (' in line or '=(' in line) and 'cq.Workplane' in line):
+                            # Multi-line chain with opening paren
+                            has_opening_paren = True
+                            in_chain_to_replace = True
+                            var_match = re.match(r'(\s*)(\w+)\s*=', line)
+                            if var_match:
+                                indent = var_match.group(1)
+                                var_name = var_match.group(2)
+                            log.info(f"🩹 Found start of wrong torus pattern (multi-line): {line[:60]}...")
+                            continue
+                        elif ('.sphere(' in line) or \
+                             ('.revolve(' in line and '.moveTo(' not in line):
+                            # Single-line or simple continuation
+                            has_opening_paren = False
+                            in_chain_to_replace = True
                             # Extract variable name and indent
                             var_match = re.match(r'(\s*)(\w+)\s*=', line)
                             if var_match:
@@ -1560,18 +1572,48 @@ class SelfHealingAgent:
                                 indent_match = re.match(r'(\s*)', line)
                                 indent = indent_match.group(1) if indent_match else ''
 
-                            # Mark that we're in a chain to replace
-                            in_chain_to_replace = True
-                            log.info(f"🩹 Found start of wrong torus pattern: {line[:60]}...")
+                            log.info(f"🩹 Found start of wrong torus pattern (single-line): {line[:60]}...")
                             continue
 
                     # If we're in a chain to replace, skip lines until we find the end
                     elif in_chain_to_replace:
-                        # Check if this line ends the chain
+                        # Check if this line is part of the chain to replace
                         stripped = line.strip()
-                        if stripped.endswith('))') or stripped.endswith(')') and not stripped.startswith('.'):
-                            # Found the end, insert correct code
-                            log.info(f"🩹 Found end of chain: {line[:60]}...")
+
+                        # Skip blank lines and comments while in chain
+                        if not stripped or stripped.startswith('#'):
+                            log.info(f"🩹 Skipping blank/comment line in chain: {line[:60]}...")
+                            continue
+
+                        # If line starts with '.', it's a chained method call
+                        if stripped.startswith('.'):
+                            # Determine if this is the end based on chain type
+                            if has_opening_paren:
+                                # Multi-line with opening paren: look for )) to close it
+                                is_end = stripped.endswith('))')
+                            else:
+                                # Single-line or simple chain: any line not starting with . ends it
+                                is_end = stripped.endswith(')') and not stripped.endswith('))')
+
+                            if is_end:
+                                # This is the last chained call
+                                log.info(f"🩹 Found end of chain: {line[:60]}...")
+                                new_lines.append(f'{indent}# Torus via revolve (fixed by SelfHealingAgent)')
+                                new_lines.append(f'{indent}{var_name} = (cq.Workplane("XY")')
+                                new_lines.append(f'{indent}          .moveTo({major_r}, 0).circle({minor_r})')
+                                new_lines.append(f'{indent}          .revolve(360, (0,0,0), (0,0,1)))')
+                                log.info(f"🩹 Replaced wrong pattern with torus revolve (major={major_r}, minor={minor_r})")
+                                replaced = True
+                                in_chain_to_replace = False
+                                continue
+                            else:
+                                # Still in the middle of the chain
+                                log.info(f"🩹 Skipping chain line: {line[:60]}...")
+                                continue
+                        else:
+                            # Not a chained call, not blank, not comment -> we've left the chain
+                            # Insert the fix and keep this line (don't skip it!)
+                            log.info(f"🩹 End of chain reached at non-chain line, keeping: {line[:60]}...")
                             new_lines.append(f'{indent}# Torus via revolve (fixed by SelfHealingAgent)')
                             new_lines.append(f'{indent}{var_name} = (cq.Workplane("XY")')
                             new_lines.append(f'{indent}          .moveTo({major_r}, 0).circle({minor_r})')
@@ -1579,10 +1621,8 @@ class SelfHealingAgent:
                             log.info(f"🩹 Replaced wrong pattern with torus revolve (major={major_r}, minor={minor_r})")
                             replaced = True
                             in_chain_to_replace = False
-                            continue
-                        else:
-                            # Still in the chain, skip this line
-                            log.info(f"🩹 Skipping chain line: {line[:60]}...")
+                            # CRITICAL: Keep this line instead of skipping it!
+                            new_lines.append(line)
                             continue
 
                     # Normal line, keep it
