@@ -1738,12 +1738,12 @@ class SelfHealingAgent:
                 fixed_code = '\n'.join(new_lines)
 
             elif "SEMANTIC ERROR: Prompt asks for CONE but code uses" in error:
-                log.info("🩹 Attempting semantic fix: Replace cylinder/wrong pattern with cone loft")
+                log.info("🩹 Attempting semantic fix: Replace cylinder/wrong pattern with cone extrude+taper")
 
                 # Extract parameters from prompt first, then error
                 prompt_lower = context.prompt.lower() if context and context.prompt else ""
                 base_radius = 25  # default
-                height = 50  # default
+                height = 60  # default
 
                 import re
                 # Try prompt first
@@ -1760,53 +1760,47 @@ class SelfHealingAgent:
                 if height_match:
                     height = int(height_match.group(1))
 
-                # Replace any wrong pattern with loft
+                # Strategy: Use state machine like torus healer
                 lines = fixed_code.split('\n')
                 new_lines = []
-                result_var = 'result'  # default
                 replaced = False
-                skip_until_index = -1
+                in_chain_to_replace = False
+                indent = ''
+                result_var = 'result'
 
-                # Rebuild with cone loft pattern
                 for i, line in enumerate(lines):
-                    # Skip lines that are part of the chain we're replacing
-                    if i <= skip_until_index:
-                        continue
-
-                    # Skip wrong shape creation lines (including .cylinder() hallucination)
-                    if not replaced and ('.circle(' in line or '.revolve(' in line or '.extrude(' in line or '.cylinder(' in line):
+                    # Look for lines that indicate start of wrong cone code
+                    if not replaced and not in_chain_to_replace:
+                        # Check if this line starts a cylinder pattern (circle + extrude without taper)
+                        # or if it contains .circle( or .revolve( or .extrude( or .cylinder(
                         if 'loft' not in fixed_code:  # Only replace if no loft exists
-                            # Remove multi-line chained statements (same as arc/torus)
-                            removed_chain_start = False
-                            while new_lines:
-                                last_line = new_lines[-1].strip()
-                                if ('= (' in last_line and 'cq.Workplane' in last_line) or \
-                                   last_line.endswith('(') or \
-                                   (last_line.startswith('.') and len(new_lines[-1]) - len(new_lines[-1].lstrip()) > 0):
-                                    log.info(f"🩹 Removing chained statement line: {new_lines[-1][:60]}...")
-                                    if '=' in new_lines[-1] and not removed_chain_start:
-                                        var_match = re.match(r'\s*(\w+)\s*=', new_lines[-1])
-                                        result_var = var_match.group(1) if var_match else 'result'
-                                        removed_chain_start = True
-                                    new_lines.pop()
+                            if (('= (' in line or '=(' in line) and 'cq.Workplane' in line) or \
+                               ('.circle(' in line and 'taper' not in fixed_code) or \
+                               ('.revolve(' in line) or \
+                               ('.cylinder(' in line):
+
+                                # Extract variable name and indent
+                                var_match = re.match(r'(\s*)(\w+)\s*=', line)
+                                if var_match:
+                                    indent = var_match.group(1)
+                                    result_var = var_match.group(2)
                                 else:
-                                    break
+                                    indent_match = re.match(r'(\s*)', line)
+                                    indent = indent_match.group(1) if indent_match else ''
 
-                            indent_match = re.match(r'(\s*)', line)
-                            indent = indent_match.group(1) if indent_match else ''
+                                # Mark that we're in a chain to replace
+                                in_chain_to_replace = True
+                                log.info(f"🩹 Found start of wrong cone pattern: {line[:60]}...")
+                                continue
 
-                            # Find and skip following lines that are part of the chain
-                            for j in range(i + 1, len(lines)):
-                                next_line = lines[j].strip()
-                                if next_line.startswith('.') or (next_line.endswith(')') and next_line.count(')') > next_line.count('(')):
-                                    skip_until_index = j
-                                    log.info(f"🩹 Skipping following chain line: {lines[j][:60]}...")
-                                    if next_line.endswith('))'):
-                                        break
-                                else:
-                                    break
+                    # If we're in a chain to replace, skip lines until we find the end
+                    elif in_chain_to_replace:
+                        # Check if this line ends the chain
+                        stripped = line.strip()
+                        if stripped.endswith('))') or (stripped.endswith(')') and not stripped.startswith('.')):
+                            # Found the end, insert correct code
+                            log.info(f"🩹 Found end of chain: {line[:60]}...")
 
-                            # Insert correct cone code (using extrude with taper)
                             # Calculate taper angle: taper_deg = -atan2(radius, height) converted to degrees
                             import math
                             taper_deg = -math.degrees(math.atan2(base_radius, height))
@@ -1819,9 +1813,29 @@ class SelfHealingAgent:
                             new_lines.append(f'{indent}          .extrude({height}, taper=taper_deg))')
                             log.info(f"🩹 Replaced wrong pattern with cone extrude+taper (base_r={base_radius}, h={height})")
                             replaced = True
+                            in_chain_to_replace = False
+                            continue
+                        else:
+                            # Still in the chain, skip this line
+                            log.info(f"🩹 Skipping chain line: {line[:60]}...")
                             continue
 
+                    # Normal line, keep it
                     new_lines.append(line)
+
+                # If we finished the loop but are still in a chain (single-line pattern), insert the fix
+                if in_chain_to_replace and not replaced:
+                    import math
+                    taper_deg = -math.degrees(math.atan2(base_radius, height))
+
+                    new_lines.append(f'{indent}# Cone via extrude with taper (fixed by SelfHealingAgent)')
+                    new_lines.append(f'{indent}import math')
+                    new_lines.append(f'{indent}taper_deg = -math.degrees(math.atan2({base_radius}, {height}))')
+                    new_lines.append(f'{indent}{result_var} = (cq.Workplane("XY")')
+                    new_lines.append(f'{indent}          .circle({base_radius})')
+                    new_lines.append(f'{indent}          .extrude({height}, taper=taper_deg))')
+                    log.info(f"🩹 Replaced wrong pattern with cone extrude+taper (base_r={base_radius}, h={height})")
+
                 fixed_code = '\n'.join(new_lines)
 
             elif "SEMANTIC ERROR: Prompt asks for CYLINDER but code uses" in error:
@@ -1909,59 +1923,66 @@ class SelfHealingAgent:
                 if thick_match:
                     thickness = int(thick_match.group(1))
 
-                # Replace wrong pattern with ring/washer code
+                # Strategy: Use state machine like torus and cone healers
                 lines = fixed_code.split('\n')
                 new_lines = []
                 result_var = 'result'
                 replaced = False
-                skip_until_index = -1
+                in_chain_to_replace = False
+                indent = ''
 
                 for i, line in enumerate(lines):
-                    # Skip lines that are part of the chain we're replacing
-                    if i <= skip_until_index:
-                        continue
+                    # Look for lines that indicate start of wrong ring/washer code
+                    if not replaced and not in_chain_to_replace:
+                        # Check if this line starts wrong pattern (.box or single .circle without second circle)
+                        if ('.box(' in line) or \
+                           (('= (' in line or '=(' in line) and 'cq.Workplane' in line and '.extrude(' not in fixed_code):
 
-                    if not replaced and ('.box(' in line or ('.circle(' in line and '.extrude(' not in fixed_code)):
-                        # Remove multi-line chained statements (same as other healers)
-                        removed_chain_start = False
-                        while new_lines:
-                            last_line = new_lines[-1].strip()
-                            if ('= (' in last_line and 'cq.Workplane' in last_line) or \
-                               last_line.endswith('(') or \
-                               (last_line.startswith('.') and len(new_lines[-1]) - len(new_lines[-1].lstrip()) > 0):
-                                log.info(f"🩹 Removing chained statement line: {new_lines[-1][:60]}...")
-                                if '=' in new_lines[-1] and not removed_chain_start:
-                                    var_match = re.match(r'\s*(\w+)\s*=', new_lines[-1])
-                                    result_var = var_match.group(1) if var_match else 'result'
-                                    removed_chain_start = True
-                                new_lines.pop()
+                            # Extract variable name and indent
+                            var_match = re.match(r'(\s*)(\w+)\s*=', line)
+                            if var_match:
+                                indent = var_match.group(1)
+                                result_var = var_match.group(2)
                             else:
-                                break
+                                indent_match = re.match(r'(\s*)', line)
+                                indent = indent_match.group(1) if indent_match else ''
 
-                        indent_match = re.match(r'(\s*)', line)
-                        indent = indent_match.group(1) if indent_match else ''
+                            # Mark that we're in a chain to replace
+                            in_chain_to_replace = True
+                            log.info(f"🩹 Found start of wrong ring/washer pattern: {line[:60]}...")
+                            continue
 
-                        # Find and skip following lines that are part of the chain
-                        for j in range(i + 1, len(lines)):
-                            next_line = lines[j].strip()
-                            if next_line.startswith('.') or (next_line.endswith(')') and next_line.count(')') > next_line.count('(')):
-                                skip_until_index = j
-                                log.info(f"🩹 Skipping following chain line: {lines[j][:60]}...")
-                                if next_line.endswith('))'):
-                                    break
-                            else:
-                                break
+                    # If we're in a chain to replace, skip lines until we find the end
+                    elif in_chain_to_replace:
+                        # Check if this line ends the chain
+                        stripped = line.strip()
+                        if stripped.endswith('))') or (stripped.endswith(')') and not stripped.startswith('.')):
+                            # Found the end, insert correct code
+                            log.info(f"🩹 Found end of chain: {line[:60]}...")
+                            new_lines.append(f'{indent}# Ring/Washer (annulus) via two circles + extrude (fixed by SelfHealingAgent)')
+                            new_lines.append(f'{indent}{result_var} = (cq.Workplane("XY")')
+                            new_lines.append(f'{indent}          .circle({r_outer}).circle({r_inner})')
+                            new_lines.append(f'{indent}          .extrude({thickness}))')
+                            log.info(f"🩹 Replaced wrong pattern with ring/washer (R_out={r_outer}, R_in={r_inner}, thick={thickness})")
+                            replaced = True
+                            in_chain_to_replace = False
+                            continue
+                        else:
+                            # Still in the chain, skip this line
+                            log.info(f"🩹 Skipping chain line: {line[:60]}...")
+                            continue
 
-                        # Insert ring/washer code
-                        new_lines.append(f'{indent}# Ring/Washer (annulus) via two circles + extrude (fixed by SelfHealingAgent)')
-                        new_lines.append(f'{indent}{result_var} = (cq.Workplane("XY")')
-                        new_lines.append(f'{indent}          .circle({r_outer}).circle({r_inner})')
-                        new_lines.append(f'{indent}          .extrude({thickness}))')
-                        log.info(f"🩹 Replaced wrong pattern with ring/washer (R_out={r_outer}, R_in={r_inner}, thick={thickness})")
-                        replaced = True
-                        continue
-
+                    # Normal line, keep it
                     new_lines.append(line)
+
+                # If we finished the loop but are still in a chain (single-line pattern), insert the fix
+                if in_chain_to_replace and not replaced:
+                    new_lines.append(f'{indent}# Ring/Washer (annulus) via two circles + extrude (fixed by SelfHealingAgent)')
+                    new_lines.append(f'{indent}{result_var} = (cq.Workplane("XY")')
+                    new_lines.append(f'{indent}          .circle({r_outer}).circle({r_inner})')
+                    new_lines.append(f'{indent}          .extrude({thickness}))')
+                    log.info(f"🩹 Replaced wrong pattern with ring/washer (R_out={r_outer}, R_in={r_inner}, thick={thickness})")
+
                 fixed_code = '\n'.join(new_lines)
 
             # Semantic Fix 1: Table legs positioned at center instead of corners
