@@ -1573,9 +1573,34 @@ class SelfHealingAgent:
 
                     # Detect start of wrong shape creation code (any primitive that's not annular sector)
                     if not replaced and ('.circle(' in line or '.extrude(' in line or 'revolve' in line or '.sweep(' in line or '.box(' in line or '.sphere(' in line or '.cylinder(' in line):
-                        # Get indent
-                        indent_match = re.match(r'(\s*)', line)
-                        indent = indent_match.group(1) if indent_match else ''
+                        # Check if previous line(s) are part of multi-line chained statement
+                        # (e.g., "result = (cq.Workplane("XY")" before ".box(50, 50, 50))")
+                        # If so, remove them to avoid unclosed parenthesis
+                        removed_chain_start = False
+                        while new_lines:
+                            last_line = new_lines[-1].strip()
+                            # Check if last line is part of a chained statement:
+                            # - Contains "= (" (assignment with opening paren for multi-line)
+                            # - Contains "cq.Workplane" (start of CadQuery chain)
+                            # - Ends with just "(" (opening paren)
+                            # - Is indented and starts with "." (continuation of chain)
+                            if ('= (' in last_line and 'cq.Workplane' in last_line) or \
+                               last_line.endswith('(') or \
+                               (last_line.startswith('.') and len(new_lines[-1]) - len(new_lines[-1].lstrip()) > 0):
+                                log.info(f"🩹 Removing chained statement line: {new_lines[-1][:60]}...")
+                                # If this line has the variable assignment, save its indent
+                                if '=' in new_lines[-1] and not removed_chain_start:
+                                    indent_match = re.match(r'(\s*)', new_lines[-1])
+                                    indent = indent_match.group(1) if indent_match else ''
+                                    removed_chain_start = True
+                                new_lines.pop()
+                            else:
+                                break  # Stop when we find a line that's not part of the chain
+
+                        # If we didn't remove a chain start, use current line's indent
+                        if not removed_chain_start:
+                            indent_match = re.match(r'(\s*)', line)
+                            indent = indent_match.group(1) if indent_match else ''
 
                         # Insert correct annular sector code (using user's robust approach)
                         new_lines.append(f'{indent}# Arc annulaire (annular sector) - fixed by SelfHealingAgent')
